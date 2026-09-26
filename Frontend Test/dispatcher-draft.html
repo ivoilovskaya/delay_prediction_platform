@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Москва — диспетчерская</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="dispatcher-assets/style.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+  <script src="dispatcher-assets/replay-data.js" defer></script>
+  <script src="dispatcher-assets/app.js" defer></script>
+</head>
+<body>
+<svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><symbol id="bus-icon" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="17" rx="4"/><path d="M5 12h14M8 20v2m8-2v2M8 6h8"/><circle cx="8" cy="16" r=".7"/><circle cx="16" cy="16" r=".7"/></symbol></svg>
+<header class="topbar">
+  <div class="brand"><span class="brand-icon"><svg aria-hidden="true"><use href="#bus-icon"/></svg></span><div><strong>Диспетчерская</strong><span>Москва · городской транспорт</span></div></div>
+  <div class="mode-tag"><span></span>Просмотр записи</div>
+  <div class="top-date">6 января 2026<span>Черновик интерфейса</span></div>
+</header>
+<div class="record-banner"><span><b>Исторические данные.</b> Положение автобусов — из записи. Прогноз — учебная оценка.</span><button id="about-button" type="button">О данных</button></div>
+<main class="workspace">
+  <aside class="sidebar" aria-label="Выбор автобуса">
+    <div class="sidebar-head"><div class="eyebrow">ОБЗОР ДВИЖЕНИЯ</div><h1>Транспорт на карте</h1><p id="count-label">Загружаем запись…</p></div>
+    <label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Найти автобус или адрес" aria-label="Найти автобус по ID или адресу"></label>
+    <div class="filters" aria-label="Показывать автобусы"><button type="button" data-filter="forecasts" aria-pressed="true">С прогнозом <span id="forecast-count">—</span></button><button type="button" data-filter="all" aria-pressed="false">Все <span id="all-count">—</span></button></div>
+    <div id="vehicle-list" class="vehicle-list" aria-label="Список автобусов"></div>
+    <div class="sidebar-foot">Номера маршрутов отсутствуют в датасете.<br>Автобусы обозначены по ID.</div>
+  </aside>
+  <section class="map-stage" aria-label="Карта движения транспорта в Москве">
+    <div id="map" aria-label="Интерактивная карта Москвы"></div>
+    <div id="map-message" role="status" hidden></div>
+    <div class="map-toolbar"><span class="map-title">Москва <span>Запись движения</span></span><button id="overview-button" type="button">Все автобусы</button></div>
+    <div class="map-key"><span><i class="track-dot"></i>Выбранный трек</span><span><i class="target-dot"></i>Цель прогноза</span></div>
+    <section id="vehicle-detail" class="vehicle-detail" aria-label="Подробности выбранного автобуса"></section>
+  </section>
+</main>
+<footer class="playback" aria-label="Воспроизведение записи">
+  <button id="play-button" type="button" aria-label="Воспроизвести запись"><span id="play-symbol" aria-hidden="true">▶</span><span id="play-label">Смотреть запись</span></button>
+  <div class="playback-time"><strong id="current-time">14:30</strong><span>Время записи</span></div>
+  <div class="timeline"><label for="time-slider" class="sr-only">Выбрать время записи</label><input id="time-slider" type="range" min="0" max="6" value="0" step="1"><div><span>14:30</span><span>14:45</span><span>15:00</span></div></div>
+  <span class="step-label">Шаг 5 минут</span>
+</footer>
+<div id="announcement" class="sr-only" aria-live="polite"></div>
+<dialog id="about-dialog"><div class="dialog-head"><h2>О данных этого черновика</h2><button id="close-about" type="button" aria-label="Закрыть информацию">×</button></div><p>Карта Москвы — OpenStreetMap. Точки автобусов и записанные треки взяты из телеметрии за 6 января 2026 года.</p><p>Учебный прогноз из <code>sample_submission.csv</code> равен известному текущему отклонению. Модель проекта пока не подключена. Это не прямой эфир.</p><p>Синяя линия — история движения за последние 20 минут, с сокращённым числом точек. Она не обозначает полный маршрут. Кружки — ближайшие по времени точки расписания; адрес может отсутствовать.</p><p>Время показано как в исходных таблицах, без пересчёта часового пояса. Серые значки означают, что последние достоверные координаты старше двух минут.</p><p>Статусы черновика: опоздание больше 2 минут, опережение больше 1 минуты, иначе небольшое отклонение. Красный используется от 5 минут опоздания. Пороги ещё нужно согласовать.</p><button class="primary" id="understood" type="button">Понятно</button></dialog>
+<noscript>Для интерактивной карты и просмотра записи необходимо включить JavaScript.</noscript>
+</body>
+</html>
