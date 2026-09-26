@@ -1,38 +1,31 @@
-/* Historical replay is delivered by FastAPI; worker status is reported separately. */
+/* Live dispatcher: all vehicle data comes from the read-only FastAPI fleet endpoint. */
 (async () => {
   'use strict';
-  const REPLAY = await fetch('/dispatcher/replay', {cache:'no-store'})
-    .then(response => { if (!response.ok) throw new Error(`HTTP ${response.status}`); return response.json(); })
-    .catch(() => null);
+  const Data = window.DispatcherData;
+  let snapshot = {time:'—', vehicles:[]}, metadata = {}, connected = false, loading = false, pollTimer = null;
   const $ = id => document.getElementById(id);
-  const state = { frame: 0, selected: '131672', filter: 'forecasts', query: '', playing: false, mapStyle: 'positron', gps: true, stops: true, segmentIndex: null, scenario: 'observed', scope: 'all', threshold: 300 };
-  let timer = null, map = null, vehicleLayer = null, trackLayer = null, tiles = null, styleLayer = null;
+  const state = {selected:null, filter:'all', query:'', mapStyle:'positron', gps:true, stops:true, segmentIndex:null, scope:'all', threshold:300};
+  let map = null, vehicleLayer = null, trackLayer = null, tiles = null, styleLayer = null;
   const issueColors = { normal:'#a7a4a0', warning:'#e5a32b', critical:'#ca2437', blocked:'#4d2630' };
   const icon = '<svg aria-hidden="true"><use href="#bus-icon"/></svg>';
   const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const frame = () => REPLAY.frames[state.frame];
-  const delayText = seconds => `${seconds > 0 ? '+' : seconds < 0 ? '−' : ''}${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(Math.abs(seconds) / 60)} мин`;
+  const frame = () => snapshot;
+  const delayText = seconds => seconds == null ? '—' : `${seconds > 0 ? '+' : seconds < 0 ? '−' : ''}${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(Math.abs(seconds) / 60)} мин`;
   const inScope = v => state.scope === 'all' || state.scope === 'east' && v.position[1] >= 37.7 || state.scope === 'south' && v.position[0] < 55.7;
   const scopedVehicles = () => frame().vehicles.filter(inScope);
-  const signal = v => {
-    if (state.scenario === 'risk-one' && v.id === '131672') return { kind:'risk', predicted:420, demo:true };
-    if (state.scenario === 'risk-many') {
-      if (['122613','129964'].includes(v.id)) return { kind:'late', current:420, demo:true };
-      if (['131672','135081'].includes(v.id)) return { kind:'risk', predicted:420, demo:true };
-    }
-    if (state.scenario === 'breakdown' && v.id === '131672') return { kind:'blocked', demo:true };
-    if (v.age > 120 || !v.forecast) return { kind:'none' };
-    // The supplied sample forecast repeats the known current deviation.
-    return v.forecast.delay >= state.threshold ? { kind:'late', current:v.forecast.delay } : { kind:'none' };
-  };
+  const signal = v => Data.signal(v, state.threshold, connected);
+  const fresh = v => Data.fresh(v, connected);
   const status = v => {
+    if (!connected) return {label:'Нет связи · данные устарели', tone:'gray'};
+    if (v.age > 120) return {label:'Координаты устарели', tone:'gray'};
     const s = signal(v);
-    if (s.kind === 'late') return { label:'Уже опаздывает', tone:'red' };
-    if (s.kind === 'risk') return { label:'Высокий прогноз задержки', tone:'amber' };
-    if (s.kind === 'blocked') return { label:'Поломка · демо', tone:'red' };
-    if (v.age > 120) return { label:'Координаты устарели', tone:'gray' };
-    if (!v.forecast) return { label:'Нет оценки', tone:'gray' };
-    return { label:'Ниже порога', tone:'green' };
+    if (s.kind === 'late') return {label:'Текущая задержка ≥ порога', tone:'red'};
+    if (s.kind === 'risk') return {label:'Прогноз задержки ≥ порога', tone:'amber'};
+    if (v.forecast && !fresh(v)) return {label:'Прогноз устарел', tone:'gray'};
+    if (v.routeStatus === 'off_route') return {label:'Далеко от плана', tone:'gray'};
+    if (!v.hasSchedule) return {label:'Нет плана', tone:'gray'};
+    if (!v.forecast) return {label:'Ожидаем прогноз', tone:'gray'};
+    return {label:'Ниже порога', tone:'green'};
   };
   const ageText = seconds => seconds < 60 ? `${seconds} с назад` : `${Math.floor(seconds / 60)} мин назад`;
   const workspace = document.querySelector('.workspace');
@@ -98,7 +91,7 @@
 
   function setupMap() {
     if (!window.L) {
-      mapMessage('Карта не загрузилась. Проверьте подключение к интернету и обновите страницу. Данные записи доступны в списке.');
+      mapMessage('Карта не загрузилась. Проверьте подключение к интернету и обновите страницу. Данные транспорта доступны в списке.');
       $('overview-button').disabled = true;
       return;
     }
@@ -125,14 +118,11 @@
     const targetIndex = v.stops.findIndex(stop => stop.position[0] === v.forecast?.target?.[0] && stop.position[1] === v.forecast?.target?.[1]);
     const incidentIndex = Math.min(segments.length - 1, Math.max(0, targetIndex - (v.age > 120 ? 1 : 0)));
     let incident = null;
-    if (state.scenario === 'observed' && signal(v).kind === 'late') {
-      incident = { tone:'critical', label:'Автобус уже опаздывает', note:`${delayText(v.forecast.delay)} текущего отклонения · причина не определена` };
-    } else if (state.scenario === 'risk-one') {
-      incident = { tone:'warning', label:'1 ТС под риском', note:'Демонстрационный сигнал; вероятность модель пока не отдаёт' };
-    } else if (state.scenario === 'risk-many') {
-      incident = { tone:'critical', label:'Несколько ТС под риском', note:'Пример группового сбоя, возможная пробка; причина не подтверждена' };
-    } else if (state.scenario === 'breakdown') {
-      incident = { tone:'blocked', label:'Пример: поломка', note:'Демонстрационный сигнал, не из данных проекта' };
+    const sig = signal(v);
+    if (sig.kind === 'late') {
+      incident = {tone:'critical', label:'Оценка задержки ≥ порога', note:`${delayText(v.currentDelay)} по GPS и плану · причина неизвестна`};
+    } else if (sig.kind === 'risk' && targetIndex >= 0) {
+      incident = {tone:'warning', label:'Прогноз задержки ≥ порога', note:`${delayText(v.forecast.delay)} к целевой остановке · это не вероятность сбоя`};
     }
     return segments.map(segment => ({...segment, issue:segment.index === incidentIndex ? incident : null, color:segment.index === incidentIndex && incident ? issueColors[incident.tone] : issueColors.normal }));
   }
@@ -161,7 +151,7 @@
     if (!segment) {
       banner.className = 'incident-banner incident-none';
       banner.disabled = true;
-      banner.innerHTML = '<strong>Нет выделенного проблемного участка</strong><span>Выберите автобус с прогнозом или демонстрационный сценарий.</span>';
+      banner.innerHTML = '<strong>Нет выделенного проблемного участка</strong><span>Нет актуального сигнала для выбранного транспорта.</span>';
       return;
     }
     banner.className = `incident-banner incident-${segment.issue.tone}`;
@@ -170,16 +160,14 @@
   }
 
   function renderVerdict() {
-    const assessed = scopedVehicles().filter(v => v.forecast || signal(v).kind !== 'none');
-    const late = assessed.filter(v => signal(v).kind === 'late').length;
-    const risk = assessed.filter(v => signal(v).kind === 'risk').length;
-    const blocked = assessed.filter(v => signal(v).kind === 'blocked').length;
-    const demo = state.scenario !== 'observed';
-    const item = { tone:blocked || late + risk >= 2 ? 'critical' : late || risk ? 'warning' : 'normal', title:blocked ? 'ТС остановилось на линии' : late + risk >= 2 ? 'Высокий риск сбоя движения' : risk ? 'Внимание: ТС под риском' : late ? 'Внимание: автобус опаздывает' : 'Нет сигналов выше порога', late, risk:demo ? risk : null, blocked, total:assessed.length, source:demo ? 'ДЕМО · ГРУППИРОВКА ПО МАРШРУТУ УСЛОВНАЯ' : 'ДАННЫЕ ЗАПИСИ · МАРШРУТЫ НЕ УКАЗАНЫ', detail:demo ? 'Жёлтый — прогноз задержки, красный — уже опаздывает. Причина сбоя не подтверждена.' : `Порог: ${state.threshold / 60} мин. В выборке доступно текущее отклонение; отдельного прогноза риска нет.` };
-    const total = Math.max(item.total, 1);
-    const blocks = Array.from({length:total}, (_,index) => `<i class="${index < item.late ? 'late' : index < item.late + (item.risk || 0) ? 'risk' : index < item.late + (item.risk || 0) + (item.blocked || 0) ? 'blocked' : ''}"></i>`).join('');
-    $('verdict-panel').className = `verdict-panel verdict-${item.tone}`;
-    $('verdict-panel').innerHTML = `<div class="verdict-main"><span class="verdict-overline">ВЕРДИКТ / ${escapeHTML(item.source)}</span><strong>${escapeHTML(item.title)}</strong><p>${escapeHTML(item.detail)}</p></div><div class="verdict-stats"><div><b>${item.late}</b><span>Уже<br>опаздывают</span></div><div><b>${item.risk === null ? '—' : item.risk}</b><span>С высоким<br>риском</span></div>${item.blocked ? `<div><b>${item.blocked}</b><span>Поломка</span></div>` : ''}<div class="verdict-scale"><span>${item.total ? `Сигналы: ${item.late + (item.risk || 0) + (item.blocked || 0)} из ${item.total} ТС` : 'Нет оценок'}</span><div>${blocks}</div></div></div>`;
+    const vehicles = scopedVehicles();
+    const late = vehicles.filter(v => signal(v).kind === 'late').length;
+    const risk = vehicles.filter(v => signal(v).kind === 'risk').length;
+    const count = vehicles.filter(fresh).length;
+    const tone = !connected ? 'normal' : late ? 'critical' : risk ? 'warning' : 'normal';
+    const title = !connected ? 'Ожидаем соединение с сервером' : !vehicles.length ? 'Нет свежей телеметрии' : late ? 'Есть транспорт с текущей задержкой' : risk ? 'Прогнозируется задержка выше порога' : 'Нет сигналов выше порога';
+    $('verdict-panel').className = `verdict-panel verdict-${tone}`;
+    $('verdict-panel').innerHTML = `<div class="verdict-main"><span class="verdict-overline">ОБЗОР / ${metadata.mode === 'historical' ? 'ИСТОРИЧЕСКАЯ БАЗА' : 'ДАННЫЕ БАЗЫ'}</span><strong>${title}</strong><p>Порог: ${state.threshold / 60} мин. Текущая задержка — оценка по GPS; прогноз — сохранённый результат модели. Причины и вероятность сбоя не определяются.</p></div><div class="verdict-stats"><div><b>${connected ? late : '—'}</b><span>Текущая задержка<br>≥ порога</span></div><div><b>${connected ? risk : '—'}</b><span>Прогноз<br>≥ порога</span></div><div><b>${count}</b><span>Свежих<br>прогнозов</span></div></div>`;
   }
 
   function visibleVehicles() {
@@ -190,10 +178,10 @@
 
   function renderList() {
     const vehicles = visibleVehicles();
-    $('forecast-count').textContent = scopedVehicles().filter(v => v.forecast || signal(v).kind !== 'none').length;
+    $('forecast-count').textContent = scopedVehicles().filter(v => v.forecast).length;
     $('all-count').textContent = scopedVehicles().length;
     $('stat-vehicles').textContent = scopedVehicles().length;
-    $('stat-forecasts').textContent = scopedVehicles().filter(v => v.forecast || signal(v).kind !== 'none').length;
+    $('stat-forecasts').textContent = scopedVehicles().filter(v => v.forecast).length;
     $('count-label').textContent = `${scopedVehicles().length} автобусов в зоне · ${frame().time}`;
     document.querySelectorAll('[data-filter]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.filter === state.filter)));
     if (!vehicles.length) {
@@ -204,22 +192,28 @@
       const s = status(v), f = v.forecast;
       const address = f?.address || v.stops[0]?.address || (v.hasSchedule ? 'Нет ближайших точек расписания' : 'Расписание отсутствует');
       const sig = signal(v);
-      return `<button type="button" class="vehicle-card signal-${sig.kind}" data-vehicle="${escapeHTML(v.id)}" aria-pressed="${v.id === state.selected}" aria-controls="vehicle-detail"><div class="vehicle-top"><span class="bus-mini">${icon}</span><div><div class="vehicle-name">Автобус ${escapeHTML(v.id)}</div><div class="vehicle-caption">${sig.demo ? 'Демонстрационный сигнал' : f ? 'Учебная оценка' : 'Данные телеметрии'}</div></div></div><p class="vehicle-address">${escapeHTML(address)}</p><span class="status-chip ${s.tone}">${s.label}</span><div class="card-bottom" style="margin-top:14px"><span>${f ? `К ${f.plan} · через ${f.horizon} мин` : `Координаты: ${v.lastSeen}`}</span><strong>${sig.predicted ? delayText(sig.predicted) : sig.current ? delayText(sig.current) : f ? delayText(f.delay) : '—'}</strong></div></button>`;
+      return `<button type="button" class="vehicle-card signal-${sig.kind}" data-vehicle="${escapeHTML(v.id)}" aria-pressed="${v.id === state.selected}" aria-controls="vehicle-detail"><div class="vehicle-top"><span class="bus-mini">${icon}</span><div><div class="vehicle-name">Автобус ${escapeHTML(v.id)}</div><div class="vehicle-caption">${f ? 'Прогноз из базы · ' + escapeHTML(f.model) : 'Данные телеметрии'}</div></div></div><p class="vehicle-address">${escapeHTML(address)}</p><span class="status-chip ${s.tone}">${s.label}</span><div class="card-bottom" style="margin-top:14px"><span>${f ? `К ${f.plan} МСК` : `Координаты: ${v.lastSeen}`}</span><strong>${f ? delayText(f.delay) : '—'}</strong></div></button>`;
     }).join('');
   }
 
   function renderDetails() {
     const v = frame().vehicles.find(v => v.id === state.selected);
-    if (!v) { $('vehicle-detail').innerHTML = '<p>Выберите автобус на карте или в списке.</p>'; return; }
-    const s = status(v), f = v.forecast, sig = signal(v);
-    let body = `<div class="detail-top"><strong>Автобус ${escapeHTML(v.id)}</strong><span class="status-chip ${s.tone}">${s.label}</span></div>`;
+    if (!v) { $('vehicle-detail').innerHTML = '<p>Нет выбранного транспорта. Ожидаем телеметрию или выберите другую зону.</p>'; return; }
+    const s = status(v), f = v.forecast;
+    let body = `<div class="detail-top"><strong>ТС ${escapeHTML(v.id)}</strong><span class="status-chip ${s.tone}">${s.label}</span></div>`;
+    const nearby = v.currentStop || v.nextStop;
+    body += `<p class="detail-sub">${v.currentStop ? 'Рядом с остановкой' : 'Следующая остановка'}: ${escapeHTML(nearby?.address || 'нет данных')}</p>`;
+    body += `<div class="arrival-grid"><div><span>Задержка сейчас ≈</span><b>${delayText(v.currentDelay)}</b></div><div><span>Прогноз задержки</span><b>${delayText(f?.delay)}</b></div><div><span>Ожидаемое прибытие</span><b>${f?.arrival || '—'}</b></div></div>`;
     if (f) {
-      body += `<p class="detail-address">${escapeHTML(f.address)}</p><p class="detail-sub">Целевая остановка через ${f.horizon} мин · ${sig.demo ? 'демонстрационный сценарий' : 'учебная оценка повторяет текущее отклонение'}</p><div class="arrival-grid"><div><span>По расписанию</span><b>${f.plan}</b></div><div><span>Текущее отклонение</span><b>${delayText(f.delay)}</b></div><div><span>${sig.predicted ? 'Прогноз · демо' : 'Порог'}</span><b>${sig.predicted ? delayText(sig.predicted) : `${state.threshold / 60} мин`}</b></div></div>`;
+      body += `<p class="detail-address">${escapeHTML(f.address)}</p><p class="detail-sub">План: ${f.plan} МСК · рассчитано: ${f.calculated} МСК · ${escapeHTML(f.model)}</p>`;
+      if (!fresh(v)) body += '<p class="detail-warning">Прогноз устарел или связь с сервером потеряна. Он показан справочно.</p>';
+      if (f.degraded) body += '<p class="detail-warning">Прогноз рассчитан при неполной телеметрии.</p>';
+      if (f.reason || f.model === 'baseline') body += `<p class="detail-warning">Резервный расчёт: ${escapeHTML(f.reason || 'baseline')}</p>`;
+      if (f.interval.every(Number.isFinite)) body += `<p class="detail-sub">Интервал задержки: ${delayText(f.interval[0])} … ${delayText(f.interval[1])}</p>`;
     } else {
-      body += `<p class="detail-empty">На выбранный момент прогноза нет. ${v.stops.length ? 'Доступны положение автобуса и ближайшие точки расписания.' : v.hasSchedule ? 'Ближайших точек расписания на следующие 25 минут нет.' : 'Для этого автобуса в датасете нет расписания.'}</p>`;
+      body += '<p class="detail-empty">Прогноза пока нет: ожидаем воркер или плановую остановку в окне +10…15 минут. Транспорт показан по телеметрии.</p>';
     }
-    if (v.age > 120) body += `<p class="detail-warning">Последние достоверные координаты — ${v.lastSeen}. Положение автобуса на выбранный момент неизвестно.</p>`;
-    body += `<div class="detail-foot"><span>Координаты: ${ageText(v.age)}</span><span>Скорость в ${v.lastSeen}: ${v.speed} км/ч</span></div>`;
+    body += `<div class="detail-foot"><span>Координаты: ${ageText(v.age)}</span><span>Скорость: ${v.speed == null ? '—' : escapeHTML(v.speed) + ' км/ч'} · МСК</span></div>`;
     $('vehicle-detail').innerHTML = body;
   }
 
@@ -229,7 +223,7 @@
     scopedVehicles().forEach(v => {
       const selected = v.id === state.selected;
       const sig = signal(v);
-      const html = `<div class="bus-marker signal-${sig.kind} ${selected ? 'selected' : ''} ${v.age > 120 && sig.kind === 'none' ? 'old' : ''}">${icon}</div>`;
+      const html = `<div class="bus-marker signal-${sig.kind} ${selected ? 'selected' : ''} ${!connected || v.age > 120 ? 'old' : ''}">${icon}</div>`;
       const marker = L.marker(v.position, { icon: L.divIcon({html,className:'bus-pin',iconSize:selected?[46,46]:[40,40],iconAnchor:selected?[23,23]:[20,20]}),title:`Автобус ${v.id}${v.age > 120 ? ', координаты устарели' : ''}`,alt:`Автобус ${v.id}`,zIndexOffset:selected?1000:0 }).addTo(vehicleLayer);
       marker.on('click', () => choose(v.id));
     });
@@ -253,7 +247,7 @@
         L.polyline([s.from.position, s.to.position], {color:s.color,weight:s.issue || active?8:4,opacity:active?1:.9,dashArray:s.issue?'10 5':'5 9',interactive:false}).addTo(trackLayer);
         if (s.issue) {
           const midpoint = [(s.from.position[0] + s.to.position[0]) / 2, (s.from.position[1] + s.to.position[1]) / 2];
-          const sign = `<span class="issue-marker ${s.issue.tone}">${s.issue.tone === 'blocked' ? '×' : state.scenario === 'risk-many' ? '4' : '!'}</span>`;
+          const sign = `<span class="issue-marker ${s.issue.tone}">!</span>`;
           L.marker(midpoint,{icon:L.divIcon({html:sign,className:'issue-pin',iconSize:[34,34],iconAnchor:[17,17]}),title:s.issue.label,zIndexOffset:1500}).bindTooltip(s.issue.label).addTo(trackLayer);
         }
       });
@@ -264,7 +258,7 @@
     }
     if (v.forecast?.target) {
       const tooltip = document.createElement('div');
-      tooltip.textContent = `${v.forecast.address} · ${signal(v).predicted ? `демо-прогноз ${delayText(signal(v).predicted)}` : `текущее отклонение ${delayText(v.forecast.delay)}`} к ${v.forecast.plan}`;
+      tooltip.textContent = `${v.forecast.address} · прогноз ${delayText(v.forecast.delay)}${fresh(v) ? '' : ' (устарел)'} к ${v.forecast.plan}`;
       L.circleMarker(v.forecast.target,{radius:10,color:'#dc3447',weight:3,fillColor:'#fff',fillOpacity:1}).bindTooltip(tooltip,{permanent:true,direction:'bottom',offset:[0,12]}).addTo(trackLayer);
     }
     if (focus) {
@@ -276,8 +270,7 @@
 
   function render(focus = false) {
     $('current-time').textContent = frame().time;
-    $('time-slider').value = state.frame;
-    $('time-slider').setAttribute('aria-valuetext',`${frame().time}, 6 января 2026 года, время записи`);
+    $('current-date').textContent = Data.date(metadata.reference_time) + ' · МСК';
     renderList(); renderDetails(); renderSegments(); renderIncident(); renderVerdict(); drawMap(focus);
   }
 
@@ -288,38 +281,57 @@
     $('announcement').textContent = `Выбран автобус ${id}. Подробности прогноза обновлены.`;
   }
 
-  function stopPlayback() {
-    clearInterval(timer); timer = null; state.playing = false;
-    $('play-symbol').textContent = '▶'; $('play-label').textContent = 'Смотреть запись';
-    $('play-button').setAttribute('aria-label','Воспроизвести запись');
-  }
-
-  async function pollServer() {
-    const badge = $('server-status');
-    try {
-      const [health, prediction] = await Promise.all([
-        fetch('/health', {cache:'no-store'}).then(response => { if (!response.ok) throw new Error('HTTP ' + response.status); return response.json(); }),
-        fetch('/predictions/latest', {cache:'no-store'}).then(response => { if (!response.ok) throw new Error('HTTP ' + response.status); return response.json(); })
-      ]);
-      if (health.status !== 'ok' || !['ready', 'stale', 'unavailable'].includes(prediction.status) || !Array.isArray(prediction.predictions)) throw new Error('API unavailable');
-      const stateText = prediction.status === 'ready' ? 'есть свежие ML-прогнозы' : prediction.status === 'stale' ? 'прогноз устарел' : 'прогноза пока нет';
-      badge.className = `server-status server-${prediction.status}`;
-      badge.textContent = `FastAPI подключён · ${stateText} · ML-прогнозы читаются из БД; карта показывает отдельную историческую запись`;
-    } catch {
-      badge.className = 'server-status server-error';
-      badge.textContent = 'Нет связи с FastAPI · историческая карта может оставаться доступной';
+  function selectAvailable() {
+    if (!scopedVehicles().some(v => v.id === state.selected)) {
+      state.selected = scopedVehicles()[0]?.id || null;
+      state.segmentIndex = null;
     }
   }
-  pollServer();
-  setInterval(pollServer, 3000);
 
-  if (!REPLAY?.frames?.length) {
-    $('count-label').textContent = 'Запись не загрузилась';
-    mapMessage('Не удалось получить запись через FastAPI. Проверьте сервер и обновите страницу.');
-    $('play-button').disabled = true; $('time-slider').disabled = true;
-    return;
+  async function refresh() {
+    if (loading) return;
+    loading = true;
+    clearTimeout(pollTimer);
+    $('refresh-button').disabled = true;
+    const badge = $('server-status');
+    try {
+      const response = await fetch('/vehicles/active', {cache:'no-store', signal:AbortSignal.timeout(10000)});
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const next = Data.adapt(data);
+      const first = !snapshot.vehicles.length && next.vehicles.length;
+      snapshot = next; metadata = data; connected = true;
+      selectAvailable();
+      state.segmentIndex = null;
+      const historical = data.mode === 'historical';
+      $('mode-label').textContent = historical ? 'ИСТОРИЧЕСКАЯ БАЗА' : 'ЖИВОЙ ПОТОК';
+      $('score-source').textContent = historical ? 'СОСТОЯНИЕ НА ВРЕМЯ ТЕЛЕМЕТРИИ' : 'ТЕЛЕМЕТРИЯ · FASTAPI';
+      $('data-source').textContent = (historical ? 'Исторический режим: состояние на момент последней точки базы. ' : 'Живые данные: транспорт с достоверной точкой за последние 2 минуты. ') + (data.demo_plan ? 'ДЕМО: искусственное расписание и случайное движение эмулятора; это не проверка точности модели.' : 'Прогнозы читает API из общей базы.');
+      const ready = snapshot.vehicles.filter(fresh).length;
+      badge.className = `server-status server-${ready ? 'ready' : 'unavailable'}`;
+      badge.textContent = `FastAPI подключён · ТС: ${snapshot.vehicles.length} · свежих прогнозов: ${ready}`;
+      $('last-update').textContent = 'Получено ' + Data.clock(new Date().toISOString()) + ' МСК';
+      render(Boolean(first));
+    } catch {
+      connected = false;
+      badge.className = 'server-status server-error';
+      badge.textContent = 'Нет актуального ответа FastAPI. Показанные данные устарели; повторяем запрос через 5 секунд.';
+      $('mode-label').textContent = 'НЕТ СВЯЗИ';
+      render();
+    } finally {
+      loading = false;
+      $('refresh-button').disabled = false;
+      pollTimer = setTimeout(refresh, 5000);
+    }
   }
-  setupMap(); render(true);
+  try {
+    setupMap();
+  } catch {
+    map = null;
+    mapMessage('Карта недоступна. Телеметрия и прогнозы остаются доступны в списке.');
+  }
+  render(); refresh();
+  $('refresh-button').addEventListener('click', refresh);
   $('vehicle-list').addEventListener('click', event => {
     const button = event.target.closest('[data-vehicle]');
     if (!button) return;
@@ -327,15 +339,9 @@
     $('vehicle-list').querySelector(`[data-vehicle="${state.selected}"]`)?.focus({preventScroll:true});
   });
   document.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => {state.filter=button.dataset.filter;renderList();}));
-  document.querySelectorAll('[data-scenario]').forEach(button => button.addEventListener('click', () => {
-    state.scenario = button.dataset.scenario;
-    state.segmentIndex = null;
-    document.querySelectorAll('[data-scenario]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
-    render();
-  }));
   $('scope-select').addEventListener('change', event => {
     state.scope = event.target.value;
-    if (!scopedVehicles().some(v => v.id === state.selected)) state.selected = scopedVehicles().find(v => v.forecast)?.id || scopedVehicles()[0]?.id;
+    selectAvailable();
     state.segmentIndex = null;
     render();
     if (map && scopedVehicles().length) map.fitBounds(L.latLngBounds(scopedVehicles().map(v => v.position)),{padding:[55,55],maxZoom:12,animate:false});
@@ -371,22 +377,6 @@
   $('overview-button').addEventListener('click', () => {
     if (map && scopedVehicles().length) map.fitBounds(L.latLngBounds(scopedVehicles().map(v => v.position)),{padding:[55,55],maxZoom:12,animate:false});
   });
-  $('time-slider').addEventListener('input', event => {
-    stopPlayback(); state.frame = Number(event.target.value); state.segmentIndex = null; render();
-  });
-  $('play-button').addEventListener('click', () => {
-    if (state.playing) { stopPlayback(); return; }
-    if (state.frame === REPLAY.frames.length-1) state.frame = 0;
-    state.playing = true;
-    $('play-symbol').textContent = 'Ⅱ'; $('play-label').textContent = 'Пауза';
-    $('play-button').setAttribute('aria-label','Приостановить запись');
-    render();
-    timer = setInterval(() => {
-      state.frame += 1; render();
-      if (state.frame >= REPLAY.frames.length-1) stopPlayback();
-    }, 3000);
-  });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) stopPlayback(); });
   $('about-button').addEventListener('click', () => $('about-dialog').showModal());
   $('sidebar-toggle').addEventListener('click', () => setSidebarOpen(false));
   $('sidebar-open').addEventListener('click', () => setSidebarOpen(true));

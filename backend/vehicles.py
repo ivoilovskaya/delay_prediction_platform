@@ -42,6 +42,9 @@ def fleet_snapshot():
             tel['_t'] = _unix(tel[cfg.tel_time])
             tel['_received'] = _unix(tel[cfg.tel_receive]) if cfg.tel_receive else tel['_t']
             tel = tel[(tel['_received'] <= T) & (tel['_t'] <= T)]
+            tel['_valid'] = (tel[cfg.tel_valid].astype(str).str.lower().isin(['1', 'true', 't'])
+                             & pd.to_numeric(tel[cfg.tel_lat], errors='coerce').between(55, 56.5)
+                             & pd.to_numeric(tel[cfg.tel_lon], errors='coerce').between(36.5, 38.5))
             sch = pd.DataFrame()
             if schema.has_table(cfg.sch_table):
                 sch = pd.read_sql(text(f'SELECT * FROM {_q(cfg.sch_table)} WHERE {_q(cfg.sch_time)} >= :lo '
@@ -55,21 +58,48 @@ def fleet_snapshot():
                 sch['_lon'], sch['_lat'] = xy[0], xy[1]
             else:
                 sch['_lon'], sch['_lat'] = sch[cfg.sch_lon], sch[cfg.sch_lat]
+            sch = sch[np.isfinite(sch['_t']) & np.isfinite(sch['_lon']) & np.isfinite(sch['_lat'])]
             plans = {int(k): g.sort_values('_t') for k, g in sch.groupby(cfg.sch_tr)}
         from backend.endpoints import _present
         predictions = {int(row['tr_id']): _present(row) for row in latest_for_all()}
         for tr_id, group in tel.groupby(cfg.tel_tr):
             group = group.sort_values('_t')
-            last = group.iloc[-1]
+            valid_group = group[group['_valid']]
+            if valid_group.empty:
+                continue
+            last = valid_group.iloc[-1]
             if T - float(last['_t']) > result['active_window_s']:
                 continue
             row = dict(tr_id=int(tr_id), unit_id=int(last['unit_id']) if 'unit_id' in last and pd.notna(last['unit_id']) else None,
                        event_time=pd.Timestamp(last['_t'], unit='s', tz='UTC').isoformat(),
-                       speed_kmh=float(last[cfg.tel_speed]), current_delay_s=None,
+                       speed_kmh=float(last[cfg.tel_speed]) if pd.notna(last[cfg.tel_speed]) and math.isfinite(float(last[cfg.tel_speed])) else None,
+                       position=[float(last[cfg.tel_lat]), float(last[cfg.tel_lon])],
+                       telemetry_age_s=round(max(0, T - float(last['_t'])), 1),
+                       track=[], stops=[], has_schedule=False, current_delay_s=None,
                        delay_source=None, current_stop=None, next_stop=None, status='no_plan',
                        prediction=predictions.get(int(tr_id)))
+            # Разрыв трека при невалидной точке или паузе >90 секунд.
+            segments, segment, previous = [], [], None
+            for point in group.to_dict('records'):
+                if not point['_valid'] or (previous is not None and point['_t'] - previous > 90):
+                    if segment:
+                        segments.append(segment)
+                    segment = []
+                if point['_valid']:
+                    segment.append([float(point[cfg.tel_lat]), float(point[cfg.tel_lon])])
+                    previous = point['_t']
+                else:
+                    previous = None
+            if segment:
+                segments.append(segment)
+            # Ограничиваем объём; последние две GPS-точки всегда сохраняются.
+            for segment in segments[-100:]:
+                step = max(1, math.ceil(len(segment) / 100))
+                sampled = segment[:-2:step] + segment[-2:] if len(segment) > 2 else segment
+                row['track'].append(sampled)
             plan_rows = plans.get(int(tr_id))
             if plan_rows is not None and len(plan_rows):
+                row['has_schedule'] = True
                 plan = VehiclePlan.from_arrays(plan_rows[cfg.sch_stop], plan_rows['_t'], plan_rows['_lon'], plan_rows['_lat'])
                 valid = group[cfg.tel_valid].astype(str).str.lower().isin(['1', 'true', 't'])
                 track = VehicleTrack.from_arrays(group['_t'], group[cfg.tel_lon], group[cfg.tel_lat], group[cfg.tel_speed], valid).upto(T)
@@ -84,7 +114,9 @@ def fleet_snapshot():
                     stop = plan_rows.iloc[index]
                     name = stop.get('building_address')
                     return dict(id=int(stop[cfg.sch_stop]), name=str(name) if pd.notna(name) else None,
+                                position=[float(stop['_lat']), float(stop['_lon'])],
                                 planned_time=pd.Timestamp(stop['_t'], unit='s', tz='UTC').isoformat())
+                row['stops'] = [stop_at(i) for i, t in enumerate(plan.t) if T < t <= T + 1500][:100]
                 if len(track.t):
                     distances = np.hypot(plan.x - track.x[-1], plan.y - track.y[-1])
                     near = int(np.argmin(distances))
@@ -97,6 +129,8 @@ def fleet_snapshot():
                     target = plan_rows[plan_rows[cfg.sch_stop] == row['prediction']['target_stop_id']]
                     name = target.iloc[0].get('building_address') if len(target) else None
                     row['prediction']['target_stop_name'] = str(name) if pd.notna(name) else None
+                    row['prediction']['target_position'] = ([float(target.iloc[0]['_lat']), float(target.iloc[0]['_lon'])]
+                                                           if len(target) else None)
             result['vehicles'].append(row)
         return result
     finally:
