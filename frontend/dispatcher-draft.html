@@ -1,91 +1,48 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Черновик диспетчерской</title><style>:root{color-scheme:light dark}body{margin:0;padding:24px;background:light-dark(#e6ebf0,#11151b)}main{max-width:1100px;margin:auto}@media(max-width:600px){body{padding:8px}}</style></head><body><main>
-<section id="dispatcher-draft" aria-label="Черновик интерфейса диспетчера">
-<style>
-#dispatcher-draft{--dp-bg:light-dark(#f2f4f7,#15191f);--dp-panel:light-dark(#fff,#20262e);--dp-ink:light-dark(#182537,#edf1f7);--dp-muted:light-dark(#566478,#b1bdcc);--dp-line:light-dark(#dce2e9,#424e5d);--dp-accent:light-dark(#174e84,#b4d8ff);--dp-selected:light-dark(#edf5ff,#243c53);--dp-red:light-dark(#a52126,#ffb0b0);--dp-red-bg:light-dark(#fff0ef,#472b30);--dp-amber:light-dark(#805100,#f4cd89);--dp-amber-bg:light-dark(#fff5df,#413725);--dp-green:light-dark(#266043,#b2d9bf);--dp-green-bg:light-dark(#eaf5ee,#293e32);background:var(--dp-bg);color:var(--dp-ink);font:18px/1.5 system-ui,sans-serif;overflow-wrap:anywhere;padding:24px;border-radius:16px}
-#dispatcher-draft *{box-sizing:border-box}
-#dispatcher-draft button{font:inherit;color:inherit;cursor:pointer}
-#dispatcher-draft button:focus-visible{outline:3px solid var(--dp-accent);outline-offset:4px}
-#dispatcher-draft .dp-demo{font-size:14px;color:var(--dp-muted);display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:22px}
-#dispatcher-draft .dp-demo strong{border:1px solid var(--dp-line);border-radius:6px;padding:2px 8px;font-weight:600}
-#dispatcher-draft .dp-heading{display:flex;gap:20px;justify-content:space-between;align-items:center;margin-bottom:24px}
-#dispatcher-draft h1{font-size:30px;line-height:1.2;letter-spacing:-.6px;margin:0 0 8px;font-weight:650}
-#dispatcher-draft h2{font-size:22px;line-height:1.3;margin:0 0 16px;font-weight:650}
-#dispatcher-draft h3{font-size:24px;line-height:1.3;margin:14px 0;font-weight:650}
-#dispatcher-draft p{margin:0}
-#dispatcher-draft .dp-sub{color:var(--dp-muted);font-size:16px}
-#dispatcher-draft .dp-time{text-align:right;white-space:nowrap;font-size:16px;color:var(--dp-muted)}
-#dispatcher-draft .dp-time b{display:block;color:var(--dp-ink);font-size:20px;font-weight:600}
-#dispatcher-draft .dp-layout{display:grid;grid-template-columns:1.1fr 1fr;gap:22px;align-items:start}
-#dispatcher-draft .dp-list{display:grid;gap:12px}
-#dispatcher-draft .dp-item{display:block;text-align:left;width:100%;background:var(--dp-panel);border:1px solid var(--dp-line);border-radius:12px;padding:20px;transition:background .15s}
-#dispatcher-draft .dp-item[aria-pressed=true]{border:2px solid var(--dp-accent);padding:19px;background:var(--dp-selected)}
-#dispatcher-draft .dp-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-#dispatcher-draft .dp-route{font-weight:650;font-size:20px}
-#dispatcher-draft .dp-tag{font-size:14px;font-weight:600;padding:4px 9px;border-radius:6px;display:inline-block}
-#dispatcher-draft .dp-tag.red{color:var(--dp-red);background:var(--dp-red-bg)}
-#dispatcher-draft .dp-tag.amber{color:var(--dp-amber);background:var(--dp-amber-bg)}
-#dispatcher-draft .dp-tag.green{color:var(--dp-green);background:var(--dp-green-bg)}
-#dispatcher-draft .dp-stop{display:block;margin:12px 0 8px;font-size:20px;font-weight:600}
-#dispatcher-draft .dp-estimate{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:16px;color:var(--dp-muted)}
-#dispatcher-draft .dp-estimate b{color:var(--dp-ink);font-size:18px;font-weight:600}
-#dispatcher-draft .dp-details{background:var(--dp-panel);border:1px solid var(--dp-line);border-radius:12px;padding:24px}
-#dispatcher-draft .dp-value{font-size:42px;line-height:1.2;font-weight:650;letter-spacing:-1px;margin:6px 0}
-#dispatcher-draft .dp-separator{border:0;border-top:1px solid var(--dp-line);margin:22px 0}
-#dispatcher-draft dl{margin:0;display:grid;gap:16px}
-#dispatcher-draft dl>div{display:flex;justify-content:space-between;gap:16px}
-#dispatcher-draft dt{color:var(--dp-muted);font-size:16px}
-#dispatcher-draft dd{margin:0;text-align:right;font-weight:600;font-size:17px}
-#dispatcher-draft .dp-note{padding:14px 16px;background:var(--dp-bg);border-radius:8px;margin-top:24px;font-size:16px;color:var(--dp-muted)}
-#dispatcher-draft .dp-message{padding:24px;background:var(--dp-panel);border:1px solid var(--dp-line);border-radius:12px}
-#dispatcher-draft .dp-message strong{display:block;font-size:22px;margin-bottom:8px}
-#dispatcher-draft .dp-footer{color:var(--dp-muted);font-size:14px;margin-top:22px}
-#dispatcher-draft .dp-layout[hidden],#dispatcher-draft .dp-message[hidden]{display:none}
-#dispatcher-draft[data-size=large]{font-size:20px}
-#dispatcher-draft[data-size=large] .dp-stop{font-size:24px}
-#dispatcher-draft[data-size=large] .dp-item{padding:24px}
-#dispatcher-draft[data-size=large] .dp-item[aria-pressed=true]{padding:23px}
-@media(max-width:760px){#dispatcher-draft .dp-layout{grid-template-columns:1fr}#dispatcher-draft .dp-heading{align-items:flex-start}#dispatcher-draft .dp-time{white-space:normal}#dispatcher-draft{padding:18px}}
-@media(max-width:420px){#dispatcher-draft{padding:12px}#dispatcher-draft h1{font-size:26px}#dispatcher-draft .dp-heading{flex-direction:column;gap:8px}#dispatcher-draft .dp-time{text-align:left}#dispatcher-draft .dp-time b{display:inline;margin-left:8px}#dispatcher-draft .dp-details{padding:18px}#dispatcher-draft dl>div{flex-direction:column;gap:3px}#dispatcher-draft dd{text-align:left}}
-@media(prefers-reduced-motion:reduce){#dispatcher-draft .dp-item{transition:none}}
-</style>
-<div class="dp-demo"><strong>Черновик</strong><span>Вымышленные маршруты и прогнозы · пример экрана</span></div>
-<header class="dp-heading"><div><h1>Диспетчерская</h1><p class="dp-sub">Прогноз движения на ближайшие 10–15 минут</p></div><div class="dp-time">Пример обновления<b>12:00</b></div></header>
-<div class="dp-message" hidden role="status"></div>
-<div class="dp-layout">
-<div><h2>Ожидаемые задержки</h2><div class="dp-list" aria-label="Прогнозы по маршрутам"></div></div>
-<div><h2>Подробности прогноза</h2><section class="dp-details" aria-live="polite" aria-atomic="true" aria-label="Выбранный прогноз"></section></div>
-</div>
-<p class="dp-footer">Прогноз может измениться. Время последнего обновления всегда видно на экране.</p>
-<script>
-(()=>{
-const root=document.getElementById('dispatcher-draft');
-const records=[
-{id:'24',route:'24',vehicle:'А-104',place:'Центральная площадь',direction:'В сторону вокзала',delay:6,range:'от 3 до 8 минут',plan:'12:12',arrival:'12:18',horizon:12,tone:'red',label:'Задержка от 5 минут'},
-{id:'17',route:'17',vehicle:'А-208',place:'Городская больница',direction:'В сторону центра',delay:3,range:'от 1 до 5 минут',plan:'12:14',arrival:'12:17',horizon:14,tone:'amber',label:'Ожидается задержка'},
-{id:'8',route:'8',vehicle:'А-315',place:'Улица Парковая',direction:'В сторону парка',delay:2,range:'от 0 до 4 минут',plan:'12:11',arrival:'12:13',horizon:11,tone:'amber',label:'Ожидается задержка'}
-];
-const options={size:'normal',scenario:'ready'};
-let selected='24';
-const list=root.querySelector('.dp-list'),details=root.querySelector('.dp-details'),layout=root.querySelector('.dp-layout'),message=root.querySelector('.dp-message');
-function restore(saved){const p=saved?.privateContent;if(!p)return;if(records.some(r=>r.id===p.selected))selected=p.selected;if(['normal','large'].includes(p.size))options.size=p.size;if(['ready','empty','stale','offline'].includes(p.scenario))options.scenario=p.scenario;}
-function remember(){if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{selectedRoute:selected,scenario:options.scenario,textSize:options.size},privateContent:{selected,...options}}).catch(()=>{});}
-function render(){
-root.dataset.size=options.size;
-const notices={empty:['Свежих прогнозов пока нет','Оценить ситуацию сейчас нельзя. Ожидаем новые данные.'],stale:['Данные устарели','Последний пример обновления — 11:52. Эти прогнозы уже нельзя считать актуальными.'],offline:['Нет связи с системой','Получить свежие прогнозы не удалось. Состояние движения неизвестно.']};
-const notice=notices[options.scenario];layout.hidden=!!notice;message.hidden=!notice;
-root.querySelector('.dp-time').innerHTML=options.scenario==='stale'?'Пример обновления<b>11:52</b>':options.scenario==='offline'?'Связь<b>Недоступна</b>':options.scenario==='empty'?'Обновление<b>Ожидается</b>':'Пример обновления<b>12:00</b>';
-if(notice){message.replaceChildren();const title=document.createElement('strong'),desc=document.createElement('p');title.textContent=notice[0];desc.textContent=notice[1];message.append(title,desc);return;}
-list.innerHTML=records.map(r=>`<button type="button" class="dp-item" data-record="${r.id}" aria-pressed="${r.id===selected}" aria-controls="dp-selected-detail"><span class="dp-row"><span class="dp-route">Маршрут ${r.route}</span><span class="dp-tag ${r.tone}">${r.label}</span></span><span class="dp-stop">${r.place}</span><span class="dp-estimate"><span>Через ${r.horizon} мин · ${r.plan}</span><b>+${r.delay} мин</b></span></button>`).join('');
-const r=records.find(r=>r.id===selected);details.id='dp-selected-detail';
-details.innerHTML=`<span class="dp-tag ${r.tone}">${r.label}</span><h3>${r.place}</h3><p class="dp-sub">Маршрут ${r.route} · ${r.direction.toLowerCase()}</p><hr class="dp-separator"><p class="dp-sub">Ожидаемое опоздание</p><div class="dp-value">≈ ${r.delay} мин</div><p class="dp-sub">Оценочный диапазон: ${r.range}</p><hr class="dp-separator"><dl><div><dt>Прибытие по расписанию</dt><dd>${r.plan}</dd></div><div><dt>Ожидаемое прибытие</dt><dd>${r.arrival}</dd></div><div><dt>Автобус</dt><dd>${r.vehicle}</dd></div></dl><p class="dp-note">Прогноз относится к этому автобусу у указанной остановки.</p>`;
-}
-list.addEventListener('click',e=>{const button=e.target.closest('[data-record]');if(!button)return;selected=button.dataset.record;render();list.querySelector(`[data-record="${selected}"]`).focus({preventScroll:true});remember();});
-restore(window.openai?.widgetState);render();
-window.addEventListener('openai:set_globals',e=>{restore(e.detail?.globals?.widgetState);render();});
-if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:()=>{render();remember();}});tweak.addSelect(options,'size',{label:'Размер текста',options:[{label:'Обычный',value:'normal'},{label:'Крупнее',value:'large'}]});tweak.addSelect(options,'scenario',{label:'Состояние экрана',options:[{label:'Есть прогнозы',value:'ready'},{label:'Нет прогнозов',value:'empty'},{label:'Данные устарели',value:'stale'},{label:'Нет связи',value:'offline'}]});}
-})();
-</script>
-</section>
-
-</main></body></html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Москва — диспетчерская</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="dispatcher-assets/style.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+  <script src="dispatcher-assets/replay-data.js" defer></script>
+  <script src="dispatcher-assets/app.js" defer></script>
+</head>
+<body>
+<svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><symbol id="bus-icon" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="17" rx="4"/><path d="M5 12h14M8 20v2m8-2v2M8 6h8"/><circle cx="8" cy="16" r=".7"/><circle cx="16" cy="16" r=".7"/></symbol></svg>
+<header class="topbar">
+  <div class="brand"><span class="brand-icon"><svg aria-hidden="true"><use href="#bus-icon"/></svg></span><div><strong>Диспетчерская</strong><span>Москва · городской транспорт</span></div></div>
+  <div class="mode-tag"><span></span>Просмотр записи</div>
+  <div class="top-date">6 января 2026<span>Черновик интерфейса</span></div>
+</header>
+<div class="record-banner"><span><b>Исторические данные.</b> Положение автобусов — из записи. Прогноз — учебная оценка.</span><button id="about-button" type="button">О данных</button></div>
+<main class="workspace">
+  <aside class="sidebar" aria-label="Выбор автобуса">
+    <div class="sidebar-head"><div class="eyebrow">ОБЗОР ДВИЖЕНИЯ</div><h1>Транспорт на карте</h1><p id="count-label">Загружаем запись…</p></div>
+    <label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Найти автобус или адрес" aria-label="Найти автобус по ID или адресу"></label>
+    <div class="filters" aria-label="Показывать автобусы"><button type="button" data-filter="forecasts" aria-pressed="true">С прогнозом <span id="forecast-count">—</span></button><button type="button" data-filter="all" aria-pressed="false">Все <span id="all-count">—</span></button></div>
+    <div id="vehicle-list" class="vehicle-list" aria-label="Список автобусов"></div>
+    <div class="sidebar-foot">Номера маршрутов отсутствуют в датасете.<br>Автобусы обозначены по ID.</div>
+  </aside>
+  <section class="map-stage" aria-label="Карта движения транспорта в Москве">
+    <div id="map" aria-label="Интерактивная карта Москвы"></div>
+    <div id="map-message" role="status" hidden></div>
+    <div class="map-toolbar"><span class="map-title">Москва <span>Запись движения</span></span><button id="overview-button" type="button">Все автобусы</button></div>
+    <div class="map-key"><span><i class="track-dot"></i>Выбранный трек</span><span><i class="target-dot"></i>Цель прогноза</span></div>
+    <section id="vehicle-detail" class="vehicle-detail" aria-label="Подробности выбранного автобуса"></section>
+  </section>
+</main>
+<footer class="playback" aria-label="Воспроизведение записи">
+  <button id="play-button" type="button" aria-label="Воспроизвести запись"><span id="play-symbol" aria-hidden="true">▶</span><span id="play-label">Смотреть запись</span></button>
+  <div class="playback-time"><strong id="current-time">14:30</strong><span>Время записи</span></div>
+  <div class="timeline"><label for="time-slider" class="sr-only">Выбрать время записи</label><input id="time-slider" type="range" min="0" max="6" value="0" step="1"><div><span>14:30</span><span>14:45</span><span>15:00</span></div></div>
+  <span class="step-label">Шаг 5 минут</span>
+</footer>
+<div id="announcement" class="sr-only" aria-live="polite"></div>
+<dialog id="about-dialog"><div class="dialog-head"><h2>О данных этого черновика</h2><button id="close-about" type="button" aria-label="Закрыть информацию">×</button></div><p>Карта Москвы — OpenStreetMap. Точки автобусов и записанные треки взяты из телеметрии за 6 января 2026 года.</p><p>Учебный прогноз из <code>sample_submission.csv</code> равен известному текущему отклонению. Модель проекта пока не подключена. Это не прямой эфир.</p><p>Синяя линия — история движения за последние 20 минут, с сокращённым числом точек. Она не обозначает полный маршрут. Кружки — ближайшие по времени точки расписания; адрес может отсутствовать.</p><p>Время показано как в исходных таблицах, без пересчёта часового пояса. Серые значки означают, что последние достоверные координаты старше двух минут.</p><p>Статусы черновика: опоздание больше 2 минут, опережение больше 1 минуты, иначе небольшое отклонение. Красный используется от 5 минут опоздания. Пороги ещё нужно согласовать.</p><button class="primary" id="understood" type="button">Понятно</button></dialog>
+<noscript>Для интерактивной карты и просмотра записи необходимо включить JavaScript.</noscript>
+</body>
+</html>
