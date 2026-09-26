@@ -10,7 +10,7 @@
 python3 -m http.server 8000 --bind 127.0.0.1
 ```
 
-Откройте http://127.0.0.1:8000/frontend/dispatcher-draft.html.
+Откройте http://127.0.0.1:8000/frontend/test/dispatcher-draft.html.
 
 Если используете отдельный архив, запустите эту же команду в распакованной папке и откройте http://127.0.0.1:8000/dispatcher-draft.html. Для загрузки Leaflet и карты нужен интернет. Сборка и установка пакетов не требуются.
 
