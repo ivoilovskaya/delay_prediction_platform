@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Московский Транспорт / Диспетчерская</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="assets/style.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="" defer></script>
+  <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js" defer></script>
+  <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet/leaflet-maplibre-gl.js" defer></script>
+  <script src="assets/app.js" defer></script>
+</head>
+<body>
+<svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><symbol id="bus-icon" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="17" rx="4"/><path d="M5 12h14M8 20v2m8-2v2M8 6h8"/><circle cx="8" cy="16" r=".7"/><circle cx="16" cy="16" r=".7"/></symbol></svg>
+<section class="hero" aria-label="Обзор диспетчерской">
+<header class="masthead">
+  <div class="wordmark">
+    <svg class="official-mark" viewBox="100 145 210 245" role="img" aria-label="Московский транспорт" xmlns="http://www.w3.org/2000/svg">
+      <defs><filter id="mark-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  2 -2 0 0 0"/></filter></defs>
+      <image href="assets/moscow-transport-logo.png" x="0" y="0" width="720" height="516" filter="url(#mark-white)"/>
+    </svg>
+    <span class="masthead-title">Диспетчерская</span>
+  </div>
+  <div class="masthead-right"><span class="live-pill"><i></i> ДЕМО / ЗАПИСЬ</span></div>
+</header>
+  <svg class="hero-graphic" viewBox="0 0 1200 310" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><path d="M-60 240 C150 305 180 20 310 74 S460 295 614 201 S752 -55 860 74 S1008 280 1260 22"/><path d="M-80 284 C120 349 202 63 322 120 S475 345 640 247 S758 -3 875 112 S1036 314 1274 68"/><path d="M-10 -12 C200 30 224 213 345 181 S531 -43 670 46 S815 284 950 205 S1095 -55 1240 -4"/><path d="M560 317 C710 185 800 293 905 160 S1040 25 1220 112"/><path d="M690 322 C780 247 842 331 985 235 S1110 160 1260 243"/></svg>
+  <svg class="hero-ornament" viewBox="0 0 360 260" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="8" stroke-linejoin="round"><path d="M18 232h324M44 232V116l35-38 35 38v116M58 232v-79q21-25 42 0v79M132 232V88l39-43 39 43v144M146 232V121q25-31 50 0v111M228 232V111l43-55 43 55v121M243 232V150q27-29 56 0v82"/><path d="M28 116h101M121 88h99M217 111h111M171 45V17M271 56V20M79 78V42M48 178h65M135 172h74M230 187h83"/><path d="m171 8 4 6 7 1-5 5 1 7-7-4-6 4 1-7-5-5 7-1ZM271 13l3 5 6 1-4 4 1 6-6-3-5 3 1-6-4-4 6-1Z"/></g><g fill="currentColor"><circle cx="79" cy="31" r="6"/><circle cx="171" cy="8" r="4"/><circle cx="271" cy="12" r="4"/></g></svg>
+  <div class="hero-content">
+  <div class="hero-copy"><h1>ГОРОД<br><i>В ДВИЖЕНИИ</i></h1><p>Задержки, положение транспорта и время прибытия — в одном рабочем пространстве.</p></div>
+  <div class="hero-score" aria-label="Сводка"><div class="score-index">МОСКВА / 2026</div><div class="score-body"><strong id="stat-vehicles">—</strong><span>АВТОБУСОВ<br>В ЗОНЕ</span></div><div class="score-divider"></div><div class="score-body secondary"><strong id="stat-forecasts">—</strong><span>ТС<br>С ОЦЕНКОЙ</span></div><div class="score-footer">ЗАПИСЬ · НЕ ПРЯМОЙ ЭФИР</div></div>
+  </div>
+</section>
+<div class="record-banner"><span><b>Воспроизведение записи.</b> Координаты автобусов исторические; прогнозы — учебные оценки.</span><button id="about-button" type="button">Об источниках ↗</button></div>
+<div id="server-status" class="server-status" role="status" aria-live="polite">Соединяемся с FastAPI…</div>
+<main class="dashboard">
+  <section class="section-heading"><div><span class="section-number">01 — ОБЗОР</span><h2>Ситуация <em>на линии</em></h2></div><div class="section-sub">Выберите автобус в списке или на карте.<br>Данные обновляются при смене времени записи.</div></section>
+  <div class="operations-bar" aria-label="Настройки зоны и опоздания"><label>ЗОНА ОТВЕТСТВЕННОСТИ<select id="scope-select"><option value="all">Вся запись</option><option value="east">Восточная зона · GPS</option><option value="south">Южная зона · GPS</option></select></label><label>ПОРОГ ОПОЗДАНИЯ<select id="threshold-select"><option value="2">2 минуты</option><option value="5" selected>5 минут</option><option value="10">10 минут</option></select></label><span class="operations-note">Районы показаны как геофильтр. Привязка к автопарку и маршрутам появится после подключения справочников.</span></div>
+  <div class="scenario-bar" aria-label="Режим отображения проблем"><span>Показать на маршруте</span><button type="button" data-scenario="observed" aria-pressed="true">Данные записи</button><button type="button" data-scenario="risk-one" aria-pressed="false">1 ТС под риском</button><button type="button" data-scenario="risk-many" aria-pressed="false">Несколько ТС / пробка</button><button type="button" data-scenario="breakdown" aria-pressed="false">Поломка</button></div>
+  <section id="verdict-panel" class="verdict-panel" aria-label="Общий вердикт по движению" aria-live="polite"></section>
+  <div class="workspace">
+    <aside id="transport-sidebar" class="sidebar" aria-label="Выбор автобуса">
+      <div class="panel-top"><div><span class="panel-index">А / СИГНАЛЫ</span><h3>Транспорт</h3><p id="count-label">Загружаем запись…</p></div><button id="sidebar-toggle" class="panel-close" type="button" aria-controls="transport-sidebar" aria-expanded="true" aria-label="Скрыть панель транспорта" title="Скрыть панель транспорта">‹</button></div>
+      <label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="ID автобуса или адрес" aria-label="Найти автобус по ID или адресу"></label>
+      <div class="filters" aria-label="Показывать автобусы"><button type="button" data-filter="forecasts" aria-pressed="true">С оценкой <span id="forecast-count">—</span></button><button type="button" data-filter="all" aria-pressed="false">Все <span id="all-count">—</span></button></div>
+      <div id="vehicle-list" class="vehicle-list" aria-label="Список автобусов"></div>
+      <div class="sidebar-foot"><span class="foot-mark">!</span> Номера маршрутов и автопарки отсутствуют в датасете. Автобусы обозначены по ID.</div>
+    </aside>
+    <section class="map-stage" aria-label="Карта движения транспорта в Москве">
+      <div id="map" aria-label="Интерактивная карта Москвы"></div><div id="map-message" role="status" hidden></div>
+      <div class="map-top"><div class="map-heading"><span>Б / ГЕОГРАФИЯ</span><strong>МОСКВА</strong><small>КАРТА ДВИЖЕНИЯ</small></div><div class="map-actions"><button id="sidebar-open" type="button" aria-controls="transport-sidebar" aria-expanded="false" hidden>☰ Транспорт</button><button id="map-cards-toggle" type="button" aria-pressed="false">Скрыть карточки</button><button id="map-expand-toggle" type="button" aria-pressed="false">Развернуть карту</button><button id="overview-button" type="button">Все автобусы ↗</button></div></div>
+      <div class="map-tools" aria-label="Вид карты и слои"><div class="map-style-tabs" aria-label="Стиль карты"><button type="button" data-map-style="positron" aria-pressed="true">Светлая</button><button type="button" data-map-style="bright" aria-pressed="false">Цветная</button></div><div class="map-layer-tabs" aria-label="Слои маршрута"><button type="button" data-overlay="gps" aria-pressed="true">GPS путь</button><button type="button" data-overlay="stops" aria-pressed="true">Остановки</button></div></div>
+      <div class="map-key"><span><i class="track-dot"></i>GPS: записанный путь</span><span><i class="future-dot"></i>Схема по остановкам</span><span><i class="warning-dot"></i>Прогноз ≥ порога</span><span><i class="danger-dot"></i>Уже опаздывает</span></div>
+      <button id="incident-banner" class="incident-banner" type="button" aria-live="polite"></button>
+      <section id="vehicle-detail" class="vehicle-detail" aria-label="Подробности выбранного автобуса"></section>
+    </section>
+  </div>
+  <section class="route-section" aria-label="Участки выбранного автобуса"><div class="route-section-head"><div><span class="section-number">02 — ТРАЕКТОРИЯ</span><h2>Участки <em>движения</em></h2></div><p>Бордовый отрезок — последнее движение по GPS. Будущие участки соединяют остановки схематично, без привязки к улицам.</p></div><div id="current-gps-segment" class="current-gps-segment" aria-live="polite"></div><div id="segment-list" class="segment-list" aria-label="Участки между точками расписания"></div></section>
+  <section class="dispatch-note" aria-label="Решение о резервном автобусе"><span class="section-number">03 — РЕЗЕРВ</span><h2>Где нужен дополнительный автобус?</h2><p>Диспетчер должен видеть скопление и пустой интервал на одном маршруте, затем выбрать ближайший доступный резерв в автопарке. Сейчас нет ID маршрутов, привязки ТС к паркам и статуса резерва, поэтому рекомендация о выпуске не рассчитывается.</p><div><span>1 · Проблемный участок</span><span>2 · Разрыв в движении</span><span>3 · Ближайший свободный резерв</span></div></section>
+</main>
+<footer class="playback" aria-label="Воспроизведение записи"><div class="playback-label"><span>02 / ТАЙМЛАЙН</span><strong>Запись движения</strong></div><button id="play-button" type="button" aria-label="Воспроизвести запись"><span id="play-symbol" aria-hidden="true">▶</span><span id="play-label">Смотреть запись</span></button><div class="playback-time"><strong id="current-time">14:30</strong><span>6 января 2026</span></div><div class="timeline"><label for="time-slider" class="sr-only">Выбрать время записи</label><input id="time-slider" type="range" min="0" max="6" value="0" step="1"><div><span>14:30</span><span>14:45</span><span>15:00</span></div></div><span class="step-label">Шаг 5 мин</span></footer>
+<div id="announcement" class="sr-only" aria-live="polite"></div>
+<dialog id="about-dialog"><div class="dialog-head"><h2>О данных демонстрации</h2><button id="close-about" type="button" aria-label="Закрыть информацию">×</button></div><p>Картографическая основа — OpenFreeMap или OpenStreetMap. Точки автобусов и записанные GPS‑треки взяты из телеметрии за 6 января 2026 года.</p><p>Учебная оценка из <code>sample_submission.csv</code> равна известному текущему отклонению. Отдельного будущего прогноза и вероятности модель проекта пока не отдаёт. Это не прямой эфир.</p><p>Последний GPS-отрезок показывает движение автобуса по записи. Сплошная линия — история движения, а не полный маршрут. Пунктир соединяет ближайшие точки расписания по прямой: это схема будущих участков, не геометрия дорог.</p><p>Порог опоздания применяется к текущему отклонению. Жёлтый прогнозный риск и групповые сценарии показаны на демонстрационных данных. Привязки автобусов к маршрутам, автопаркам и свободным резервам в наборе нет. Восточная и южная зоны — условные фильтры по координатам, не административные границы.</p><p>Серые значки означают, что координаты старше двух минут. Время показано как в исходных таблицах, без пересчёта часового пояса.</p><button class="primary" id="understood" type="button">Понятно</button></dialog>
+<noscript>Для интерактивной карты и просмотра записи необходимо включить JavaScript.</noscript>
+</body>
+</html>

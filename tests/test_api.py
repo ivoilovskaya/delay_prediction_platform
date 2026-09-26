@@ -15,6 +15,17 @@ def test_api_read_only_when_empty(tmp_path, monkeypatch):
     assert not (tmp_path / 'absent').exists()
 
 
+def test_dispatcher_served_by_fastapi():
+    with TestClient(app) as client:
+        page = client.get('/dispatcher/')
+        assert page.status_code == 200
+        assert 'ЗОНА ОТВЕТСТВЕННОСТИ' in page.text
+        assert client.get('/dispatcher/assets/app.js').status_code == 200
+        replay = client.get('/dispatcher/replay')
+        assert replay.status_code == 200
+        assert replay.json()['frames'][0]['vehicles']
+
+
 @pytest.mark.parametrize('values, expected', [
     ([], {'status': 'unavailable', 'average': None, 'count': 0}),
     ([0], {'status': 'ready', 'average': 0, 'count': 1}),
