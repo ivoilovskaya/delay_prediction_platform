@@ -298,13 +298,13 @@
     const badge = $('server-status');
     try {
       const [health, prediction] = await Promise.all([
-        fetch('/health', {cache:'no-store'}).then(response => response.json()),
-        fetch('/predictions/latest', {cache:'no-store'}).then(response => response.json())
+        fetch('/health', {cache:'no-store'}).then(response => { if (!response.ok) throw new Error('HTTP ' + response.status); return response.json(); }),
+        fetch('/predictions/latest', {cache:'no-store'}).then(response => { if (!response.ok) throw new Error('HTTP ' + response.status); return response.json(); })
       ]);
-      if (health.status !== 'ok') throw new Error('API unavailable');
-      const stateText = prediction.status === 'ready' ? 'worker считает' : prediction.status === 'stale' ? 'прогноз устарел' : 'прогноза пока нет';
+      if (health.status !== 'ok' || !['ready', 'stale', 'unavailable'].includes(prediction.status) || !Array.isArray(prediction.predictions)) throw new Error('API unavailable');
+      const stateText = prediction.status === 'ready' ? 'есть свежие ML-прогнозы' : prediction.status === 'stale' ? 'прогноз устарел' : 'прогноза пока нет';
       badge.className = `server-status server-${prediction.status}`;
-      badge.textContent = `FastAPI подключён · ${stateText} · серверный прогноз относится к учебному генератору, не к автобусам на карте`;
+      badge.textContent = `FastAPI подключён · ${stateText} · ML-прогнозы читаются из БД; карта показывает отдельную историческую запись`;
     } catch {
       badge.className = 'server-status server-error';
       badge.textContent = 'Нет связи с FastAPI · историческая карта может оставаться доступной';
