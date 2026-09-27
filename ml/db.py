@@ -268,12 +268,15 @@ def run_cycle(predictor, engine, cfg: DBConfig, T: Optional[float] = None, write
     if T is None:
         T = current_T(engine, cfg)
     if T is None:
-        return {"T": None, "predictions": [], "skipped": [], "written": 0, "timing_ms": {}}
+        return {"T": None, "predictions": [], "skipped": [], "written": 0, "model_timing_ms": {}, "timing_ms": {}}
     states, skipped = load_states(engine, cfg, T)
     t_read = time.perf_counter()
+    model_timing = {}
     if predictor is not None:
         try:
             preds = predictor.predict_states(states) if states else []
+            if states:
+                model_timing = dict(getattr(predictor, "last_timing", {}))
         except Exception as e:  # сбой модели — бейзлайн, цикл не падает
             preds = [baseline_prediction(s, None, "hint" if s.get("cur_dev_s") is not None else "stream",
                                          f"сбой предиктора: {type(e).__name__}: {e}") for s in states]
@@ -294,5 +297,6 @@ def run_cycle(predictor, engine, cfg: DBConfig, T: Optional[float] = None, write
             written = write_predictions(engine, cfg, preds)
     t_end = time.perf_counter()
     return {"T": T, "predictions": preds, "skipped": skipped, "written": written,
+            "model_timing_ms": model_timing,
             "timing_ms": {"read": round((t_read - t0) * 1000, 1), "predict": round((t_pred - t_read) * 1000, 1),
                           "write": round((t_end - t_pred) * 1000, 1), "total": round((t_end - t0) * 1000, 1)}}

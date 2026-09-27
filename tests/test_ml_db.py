@@ -68,3 +68,25 @@ def test_service_from_db_endpoint(db, monkeypatch):
     with TestClient(app) as c:
         body = c.post("/predict/from-db").json()
     assert body["written"] == 1 and body["predictions"][0]["tr_id"] == 1
+
+
+def test_empty_cycle_does_not_reuse_previous_model_timing(db, monkeypatch):
+    from ml import db as ml_db
+
+    monkeypatch.setenv("DATABASE_URL", db)
+    cfg = ml_db.DBConfig()
+    engine = ml_db.make_engine(cfg)
+
+    class Predictor:
+        last_timing = {"features_ms": 123, "inference_ms": 456}
+
+        def predict_states(self, states):
+            raise RuntimeError("test failure")
+
+    predictor = Predictor()
+    failed = ml_db.run_cycle(predictor, engine, cfg, write=False)
+    assert failed["predictions"][0].model_used == "baseline"
+    assert failed["model_timing_ms"] == {}
+    monkeypatch.setattr(ml_db, "load_states", lambda *args: ([], []))
+    empty = ml_db.run_cycle(predictor, engine, cfg, write=False)
+    assert empty["model_timing_ms"] == {}

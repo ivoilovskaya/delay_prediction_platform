@@ -14,6 +14,7 @@ class StartRequest(BaseModel):
 
 @router.get('/status')
 def status():
+    """Вернуть положение и состояние replay; в live-режиме enabled=false."""
     if not replay.enabled():
         return {'enabled': False}
     try:
@@ -33,6 +34,11 @@ def status():
 
 @router.post('/start', status_code=202)
 def start(body: StartRequest):
+    """Запросить перезапуск с указанного времени (или начала), вернуть HTTP 202.
+
+    Команда исполняется координатором асинхронно. В live-режиме: HTTP 409;
+    некорректное время: HTTP 422; недоступность состояния: HTTP 503.
+    """
     if not replay.enabled():
         raise HTTPException(409, 'Управление доступно только в режиме исторического воспроизведения')
     try:

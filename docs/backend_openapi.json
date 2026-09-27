@@ -1,0 +1,307 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Delay Prediction API",
+    "description": "Готовые прогнозы задержек, активный транспорт и аналитика сегментов. Расчёты выполняют фоновые воркеры; HTTP backend читает результаты. В historical-режиме доступны состояние и запуск воспроизведения.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Проверить доступность HTTP-процесса",
+        "description": "Возвращает ``status=ok``, если HTTP-процесс отвечает. БД не проверяется.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/vehicles/active": {
+      "get": {
+        "tags": [
+          "vehicles"
+        ],
+        "summary": "Получить активный транспорт и данные карты",
+        "description": "Вернуть ТС со свежей телеметрией, координаты, треки, остановки и прогнозы.\n\nПри недоступности БД возвращает HTTP 503.",
+        "operationId": "get_active_vehicles_vehicles_active_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/predictions/latest": {
+      "get": {
+        "tags": [
+          "predictions"
+        ],
+        "summary": "Получить последние прогнозы всех ТС",
+        "description": "Вернуть последние прогнозы и общий статус ready, stale или unavailable.\n\nСвежесть определяется по PREDICTION_MAX_AGE_SECONDS (по умолчанию 90 с).\nПри недоступности БД возвращает HTTP 503.",
+        "operationId": "get_latest_predictions_predictions_latest_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/predictions/{tr_id}/latest": {
+      "get": {
+        "tags": [
+          "predictions"
+        ],
+        "summary": "Получить последний прогноз одного ТС",
+        "description": "Вернуть последний прогноз ТС с оценкой свежести ready или stale.\n\nОтсутствие прогноза: HTTP 404; недоступность БД: HTTP 503.",
+        "operationId": "get_latest_for_vehicle_predictions__tr_id__latest_get",
+        "parameters": [
+          {
+            "name": "tr_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Tr Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/segments": {
+      "get": {
+        "tags": [
+          "segment analytics"
+        ],
+        "summary": "Latest Segments",
+        "description": "Вернуть последнее рассчитанное состояние каждого сегмента из БД 2.",
+        "operationId": "latest_segments_analytics_segments_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/alerts": {
+      "get": {
+        "tags": [
+          "segment analytics"
+        ],
+        "summary": "Active Alerts",
+        "description": "Вернуть активные предупреждения от новых к старым из БД 2.",
+        "operationId": "active_alerts_analytics_alerts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/replay/status": {
+      "get": {
+        "tags": [
+          "historical replay"
+        ],
+        "summary": "Status",
+        "description": "Вернуть положение и состояние replay; в live-режиме enabled=false.",
+        "operationId": "status_replay_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/replay/start": {
+      "post": {
+        "tags": [
+          "historical replay"
+        ],
+        "summary": "Start",
+        "description": "Запросить перезапуск с указанного времени (или начала), вернуть HTTP 202.\n\nКоманда исполняется координатором асинхронно. В live-режиме: HTTP 409;\nнекорректное время: HTTP 422; недоступность состояния: HTTP 503.",
+        "operationId": "start_replay_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "StartRequest": {
+        "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "At"
+          }
+        },
+        "type": "object",
+        "title": "StartRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Доступность HTTP-процесса, без проверки БД."
+    },
+    {
+      "name": "vehicles",
+      "description": "Активный транспорт, GPS и состояние на карте."
+    },
+    {
+      "name": "predictions",
+      "description": "Последние прогнозы и их свежесть."
+    },
+    {
+      "name": "segment analytics",
+      "description": "Состояние сегментов и активные предупреждения."
+    },
+    {
+      "name": "historical replay",
+      "description": "Состояние и управление историческим воспроизведением."
+    }
+  ]
+}

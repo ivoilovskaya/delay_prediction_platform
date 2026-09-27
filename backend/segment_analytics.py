@@ -44,6 +44,7 @@ def _read(table, statement):
 
 @router.get("/segments")
 def latest_segments():
+    """Вернуть последнее рассчитанное состояние каждого сегмента из БД 2."""
     latest_query = select(segment_state.c.segment_id, func.max(segment_state.c.calculated_at).label('latest_at'))
     if replay.enabled():
         latest_query = latest_query.where(segment_state.c.calculated_at <= utc_datetime(replay.current_time()))
@@ -59,6 +60,7 @@ def latest_segments():
 
 @router.get("/alerts")
 def active_alerts():
+    """Вернуть активные предупреждения от новых к старым из БД 2."""
     statement = select(alerts).where(alerts.c.status == 'ACTIVE')
     if replay.enabled():
         statement = statement.where(alerts.c.updated_at <= utc_datetime(replay.current_time()))

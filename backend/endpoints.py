@@ -37,13 +37,17 @@ def _present(row):
     return result
 
 
-@router.get("/health")
+@router.get("/health", tags=["health"], summary="Проверить доступность HTTP-процесса")
 def health():
+    """Возвращает ``status=ok``, если HTTP-процесс отвечает. БД не проверяется."""
     return {"status": "ok"}
 
 
-@router.get("/vehicles/active")
+@router.get("/vehicles/active", tags=["vehicles"], summary="Получить активный транспорт и данные карты")
 def get_active_vehicles():
+    """Вернуть ТС со свежей телеметрией, координаты, треки, остановки и прогнозы.
+
+    При недоступности БД возвращает HTTP 503."""
     from backend.vehicles import fleet_snapshot
     try:
         return fleet_snapshot()
@@ -51,8 +55,12 @@ def get_active_vehicles():
         raise HTTPException(status_code=503, detail="База телеметрии или прогнозов недоступна") from exc
 
 
-@router.get("/predictions/latest")
+@router.get("/predictions/latest", tags=["predictions"], summary="Получить последние прогнозы всех ТС")
 def get_latest_predictions():
+    """Вернуть последние прогнозы и общий статус ready, stale или unavailable.
+
+    Свежесть определяется по PREDICTION_MAX_AGE_SECONDS (по умолчанию 90 с).
+    При недоступности БД возвращает HTTP 503."""
     try:
         rows = latest_for_all()
         predictions = [_present(row) for row in rows]
@@ -63,8 +71,11 @@ def get_latest_predictions():
         raise HTTPException(status_code=503, detail="База прогнозов недоступна") from exc
 
 
-@router.get("/predictions/{tr_id}/latest")
+@router.get("/predictions/{tr_id}/latest", tags=["predictions"], summary="Получить последний прогноз одного ТС")
 def get_latest_for_vehicle(tr_id: int):
+    """Вернуть последний прогноз ТС с оценкой свежести ready или stale.
+
+    Отсутствие прогноза: HTTP 404; недоступность БД: HTTP 503."""
     try:
         row = latest_for_vehicle(tr_id)
         if row is None:

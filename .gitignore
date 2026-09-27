@@ -38,3 +38,6 @@ node_modules/
 /data/dataset/ndtp-telemetry-emulator.tar
 /data/dataset/ndtp-telemetry-emulator.tar.gz
 .venv-python39/
+
+# Generated documentation
+docs/_build/

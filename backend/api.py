@@ -1,3 +1,5 @@
+"""Основное FastAPI-приложение: готовые прогнозы, аналитика и dispatcher UI."""
+
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -9,7 +11,20 @@ from backend.replay import router as replay_router
 from storage import replay
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="Delay Prediction API")
+app = FastAPI(
+    title="Delay Prediction API",
+    version="1.0.0",
+    description="Готовые прогнозы задержек, активный транспорт и аналитика сегментов. "
+                "Расчёты выполняют фоновые воркеры; HTTP backend читает результаты. "
+                "В historical-режиме доступны состояние и запуск воспроизведения.",
+    openapi_tags=[
+        {"name": "health", "description": "Доступность HTTP-процесса, без проверки БД."},
+        {"name": "vehicles", "description": "Активный транспорт, GPS и состояние на карте."},
+        {"name": "predictions", "description": "Последние прогнозы и их свежесть."},
+        {"name": "segment analytics", "description": "Состояние сегментов и активные предупреждения."},
+        {"name": "historical replay", "description": "Состояние и управление историческим воспроизведением."},
+    ],
+)
 app.include_router(router)
 app.include_router(analytics_router)
 app.include_router(replay_router)

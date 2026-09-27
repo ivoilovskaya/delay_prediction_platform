@@ -1,0 +1,2 @@
+# Дополнительно к requirements.txt; Python 3.12+
+Sphinx>=8.2,<9

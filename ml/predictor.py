@@ -202,6 +202,8 @@ class DelayPredictor:
         """
         import pandas as pd
 
+        self.last_timing = {}
+        inference_ms = 0.0
         t0 = time.perf_counter()
         feats, modes, feat_err = [], [], {}
         for i, st in enumerate(states):
@@ -227,7 +229,11 @@ class DelayPredictor:
                     from ml.sequence import build_sequence
                     seqs = np.stack([build_sequence(states[i]["plan"], states[i]["track"], float(states[i]["T"]),
                                                     feats[i]["cur_dev_s"]) for i in idx])
-                r = self.predict_frame(X, mode, seqs)
+                t_infer = time.perf_counter()
+                try:
+                    r = self.predict_frame(X, mode, seqs)
+                finally:
+                    inference_ms += (time.perf_counter() - t_infer) * 1000
                 used = self.model_type
                 if used == "ensemble" and r["resid_nn"] is None:
                     used = "boosting"
@@ -254,7 +260,8 @@ class DelayPredictor:
         per = total_ms / max(len(states), 1)
         for p_ in out:
             p_.inference_ms = round(per, 2)
-        self.last_timing = {"features_ms": round((t_feat - t0) * 1000, 2), "total_ms": round(total_ms, 2)}
+        self.last_timing = {"features_ms": round((t_feat - t0) * 1000, 2),
+                            "inference_ms": round(inference_ms, 2), "total_ms": round(total_ms, 2)}
         return out  # type: ignore[return-value]
 
     def predict_state(self, tr_id: int, plan: VehiclePlan, track: VehicleTrack, T: float,

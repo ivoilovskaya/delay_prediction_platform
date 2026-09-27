@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import signal
@@ -68,7 +69,7 @@ def main() -> None:
     backoff = 1.0
     last_T = None
     while not _stop:
-        t0 = time.time()
+        t0 = time.perf_counter()
         try:
             engine = engine or make_engine(cfg)
             T = current_T(engine, cfg)
@@ -82,9 +83,25 @@ def main() -> None:
                 log.info("T=%s: прогнозов %d (бейзлайн %d), пропущено ТС %d, время %s",
                          time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(r["T"])), r["written"], n_base,
                          len(r["skipped"]), r["timing_ms"])
+                timing = r["model_timing_ms"]
+                log.info("ML_CYCLE %s", json.dumps({
+                    "status": "ok", "T": r["T"],
+                    "cycle_ms": (time.perf_counter() - t0) * 1000,
+                    "interval_ms": args.interval * 1000,
+                    "vehicles": len(r["predictions"]), "baseline": n_base,
+                    "skipped": len(r["skipped"]),
+                    "predict_ms": r["timing_ms"]["predict"],
+                    "features_ms": timing.get("features_ms"),
+                    "inference_ms": timing.get("inference_ms"),
+                }))
                 last_T = r["T"]
             backoff = 1.0
         except Exception as e:  # база недоступна и т.п. — не падаем
+            log.info("ML_CYCLE %s", json.dumps({
+                "status": "error", "error": type(e).__name__,
+                "cycle_ms": (time.perf_counter() - t0) * 1000,
+                "interval_ms": args.interval * 1000,
+            }))
             log.error("цикл не выполнен: %s: %s — повтор через %.0f с", type(e).__name__, e, backoff)
             if args.once:
                 raise
@@ -93,7 +110,7 @@ def main() -> None:
             continue
         if args.once:
             break
-        _wake.wait(max(0.0, args.interval - (time.time() - t0)))
+        _wake.wait(max(0.0, args.interval - (time.perf_counter() - t0)))
 
 
 if __name__ == "__main__":

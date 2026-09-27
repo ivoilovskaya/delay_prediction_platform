@@ -80,3 +80,8 @@ docker compose -f compose.historical.yaml down
 ```
 
 После первого `docker load` для live-режима архив каждый раз загружать не нужно: Docker уже хранит образ `ndtp-telemetry-emulator:1.0` локально.
+
+## Документация
+
+- [Код — Sphinx](docs/README.md)
+- [API — OpenAPI / Swagger](docs/API.md)

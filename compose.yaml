@@ -54,6 +54,11 @@ services:
 
   worker:
     <<: *app
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
     command: ["python", "-m", "ml.worker"]
     volumes:
       - input-data:/data/input
