@@ -3,6 +3,8 @@
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 
@@ -61,7 +63,9 @@ def test_passage_and_api_keep_input_read_only(tmp_path, monkeypatch):
         passages = db.execute(select(results.segment_passages)).mappings().all()
         assert len(passages) == 1
         assert passages[0]["segment_id"] == "m1:outbound:0"
-        assert passages[0]["travel_time_sec"] > 0
+        # Entry at t=60 must survive the t=150 cycle: that cycle cannot yet
+        # consume the GPS packet received at t=151 and reset the entry time.
+        assert passages[0]["travel_time_sec"] == 150
         state = db.execute(select(results.segment_state).where(
             results.segment_state.c.segment_id == "m1:outbound:0").order_by(
             results.segment_state.c.calculated_at.desc())).mappings().first()
@@ -84,7 +88,7 @@ def test_passage_and_api_keep_input_read_only(tmp_path, monkeypatch):
         db.commit()
     run_cycle((BASE + timedelta(seconds=900)).timestamp(), cfg)
     with sqlite3.connect(output_file) as db:
-        assert db.execute("SELECT source, median_travel_time_sec FROM segment_baseline WHERE segment_id='m1:outbound:0'").fetchone() == ('observed', 110.0)
+        assert db.execute("SELECT source, median_travel_time_sec FROM segment_baseline WHERE segment_id='m1:outbound:0'").fetchone() == ('observed', 130.0)
 
 
 def test_unassigned_vehicle_stays_unknown(tmp_path, monkeypatch):
@@ -104,3 +108,39 @@ def test_unassigned_vehicle_stays_unknown(tmp_path, monkeypatch):
     with sqlite3.connect(output_file) as db:
         assert db.execute("SELECT match_status FROM vehicle_state WHERE tr_id=99").fetchone()[0] == "UNKNOWN"
         assert db.execute("SELECT COUNT(*) FROM segment_passages").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('conflicting', [False, True])
+def test_replay_ignores_unreceived_packets_and_handles_duplicates(tmp_path, monkeypatch, conflicting):
+    source, output = tmp_path / 'input.db', tmp_path / 'results.db'
+    monkeypatch.setenv('DATABASE_URL', f'sqlite:///{source}')
+    monkeypatch.setenv('RESULTS_DATABASE_URL', f'sqlite:///{output}')
+    # Historical CSV imports retain duplicate deliveries, unlike live ingestion.
+    with sqlite3.connect(source) as c:
+        c.execute('CREATE TABLE telemetry (tr_id INTEGER, unit_id INTEGER, event_time TEXT, '
+                  'receive_time TEXT, lon REAL, lat REAL, speed REAL, location_valid INTEGER)')
+    cfg = DBConfig()
+    initialize_ml_results(cfg)
+    results.initialize(cfg)
+    import_route(dict(route_id='history', route_name='History', is_demo=True,
+                      directions=[dict(direction_id='a', stops=[
+                          dict(stop_id='a', name='A', lat=55.75, lon=37.5),
+                          dict(stop_id='b', name='B', lat=55.75, lon=37.51)])],
+                      assignments=[dict(tr_id=42, direction_id='a', valid_from=BASE.isoformat(),
+                                        valid_to=(BASE+timedelta(hours=1)).isoformat())]), cfg.url)
+    with sqlite3.connect(source) as c:
+        for i in range(3):
+            point = (42, 142, stamp(i*30), stamp(i*30+1), 37.501+i*.001, 55.75, 12, 1)
+            c.execute('INSERT INTO telemetry VALUES (?, ?, ?, ?, ?, ?, ?, ?)', point)
+            c.execute('INSERT INTO telemetry VALUES (?, ?, ?, ?, ?, ?, ?, ?)', point)
+        if conflicting:
+            c.execute('INSERT INTO telemetry VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                      (42, 142, stamp(60), stamp(62), 37.509, 55.75, 12, 1))
+        c.execute('INSERT INTO telemetry VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                  (42, 142, stamp(90), stamp(300), 37.504, 55.75, 12, 1))
+    run_cycle((BASE+timedelta(seconds=100)).timestamp(), cfg)
+    with sqlite3.connect(output) as c:
+        state = c.execute('SELECT event_time, match_status FROM vehicle_state WHERE tr_id=42').fetchone()
+        assert state == (stamp(60), 'UNKNOWN' if conflicting else 'MATCHED')
+    with sqlite3.connect(source) as c:
+        assert c.execute('SELECT COUNT(*) FROM telemetry').fetchone()[0] == (8 if conflicting else 7)

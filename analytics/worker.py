@@ -168,7 +168,7 @@ def _load_input(conn, engine, cfg: DBConfig, T: float):
         f"WHERE {_q(cfg.tel_time)} > :start AND {_q(cfg.tel_time)} <= :end "
         f"ORDER BY {_q(cfg.tel_tr)}, {_q(cfg.tel_time)}"),
         {"start": _param(engine, T - 600), "end": _param(engine, T)}).mappings()
-    telemetry = []
+    telemetry_by_time = {}
     for point in raw:
         value = dict(point)
         value["tr_id"] = int(value[cfg.tel_tr])
@@ -178,8 +178,21 @@ def _load_input(conn, engine, cfg: DBConfig, T: float):
         value["lon"] = value[cfg.tel_lon]
         value["speed"] = value[cfg.tel_speed]
         value["location_valid"] = value[cfg.tel_valid]
-        telemetry.append(value)
-    return segment_rows, assignment_rows, telemetry
+        # A replay must not advance vehicle state using packets not yet received.
+        if value["received"] > T:
+            continue
+        key = value["tr_id"], value["t"]
+        previous = telemetry_by_time.get(key)
+        if previous is None:
+            telemetry_by_time[key] = value
+            continue
+        # Duplicate deliveries of one GPS fix must not reset the three-point
+        # movement history. Conflicting fixes remain explicitly invalid.
+        fields = ("lat", "lon", "speed", "location_valid", "unit_id")
+        if any(previous[field] != value[field] for field in fields):
+            previous["location_valid"] = False
+        previous["received"] = min(previous["received"], value["received"])
+    return segment_rows, assignment_rows, list(telemetry_by_time.values())
 
 
 def _process_vehicle(conn, tr_id, points, assignments, segments_by_route, previous, T, settings):
