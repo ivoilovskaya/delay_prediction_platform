@@ -9,7 +9,9 @@ flowchart TB
     E["Эмулятор NDTP"] -->|TCP| I["ndtp_ingestion.server"]
     I -->|валидация, запись и очистка| DB[("DATABASE_URL: input.db")]
     DB -->|"telemetry, schedule_plan"| W["ml.worker: по таймеру"]
+    DB -->|"telemetry, ручные маршруты и назначения"| SW["analytics.worker: участки"]
     W -->|"predictions"| R[("RESULTS_DATABASE_URL: results.db")]
+    SW -->|"состояние участков и предупреждения"| R
     R -->|чтение| A
     C["ml.results_maintenance: только wall"] -->|очистка predicted_at| R
     DB -->|чтение| A["FastAPI backend.api"]
@@ -248,6 +250,8 @@ python -m ml.worker --once
 - `GET /health` — жив ли HTTP-процесс; это не проверка модели и базы.
 - `GET /predictions/latest` — список последних сохранённых прогнозов, по одному на `tr_id`. Пока записей нет: `{"status":"unavailable","predictions":[]}`; если все записи устарели, общий статус — `stale`.
 - `GET /predictions/{tr_id}/latest` — последняя запись одного ТС; 404, если её нет.
+- `GET /analytics/segments` — последнее рассчитанное состояние каждого вручную заданного участка.
+- `GET /analytics/alerts` — активные предупреждения по участкам.
 
 Ответ содержит `t_forecast`, `predicted_at`, `target_stop_id`, `target_time_plan`, `predicted_delay_s`, `predicted_arrival`, `interval_lo_s`, `interval_hi_s`, `model_used`, `fallback_reason`, `degraded` и `status` (`ready`/`stale`). Времена API представлены ISO 8601 UTC; свежесть определяется по более старому из `t_forecast` и `predicted_at`. При недоступности настроенной БД API возвращает 503. Исторические прогнозы в режиме реплея закономерно отображаются как `stale`.
 
@@ -273,6 +277,8 @@ git push -u origin feature/название
 
 
 ## Диспетчерский экран с картой
+
+Для аналитики участков теперь есть отдельный процесс, который читает входную базу и пишет готовые метрики во вторую базу. Как задать маршрут, назначить автобусы и запустить расчёт, описано в [analytics/README.md](analytics/README.md). Блок «Где движение замедляется» обращается к `/analytics/segments` и `/analytics/alerts`. Если аналитика ещё не подготовлена, основная карта транспорта продолжает работать.
 
 Инструкция фронтендеру, контракт API и порядок добавления новых запросов — [frontend/README.md](frontend/README.md).
 

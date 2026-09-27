@@ -56,11 +56,16 @@ def main():
     finally:
         engine.dispose()
     initialize(cfg)
+    if cfg.results_url:
+        from analytics.results import initialize as initialize_analytics
+        initialize_analytics(cfg)
     commands = [
         ['-m', 'ml.worker'],
         ['-m', 'uvicorn', 'backend.api:app', '--host', '127.0.0.1',
          '--port', str(args.port)],
     ]
+    if cfg.results_url:
+        commands.append(['-m', 'analytics.worker'])
     if cfg.time_mode == 'wall':
         commands.append(['-m', 'ml.results_maintenance'])
     if args.ingestion:
