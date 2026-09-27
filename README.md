@@ -86,19 +86,22 @@ docker compose -f compose.historical.yaml down
 
 # Производительность:
 
-В лог добавлена статистика циклов:
+В лог добавлена статистика циклов
+Сводка по последним 100 попыткам цикла (накопите 100 циклов):
 
-средняя и максимальная длительность, превышения интервала запуска;
-количество автобусов в батче;
-средние затраты на автобус: прогнозирование, признаки и инференс;
-ошибки циклов, baseline и пропуски.
-
-Сводка по последним 100 попыткам цикла:
-
+Для потокового режима:
 ```bash
-docker compose logs --no-color --no-log-prefix worker | python -m 
-scripts.worker_stats --last 100
+docker compose logs --no-color --no-log-prefix worker | python -m scripts.worker_stats --last 100
 ```
+Для исторического:
+```bash
+docker compose -f compose.historical.yaml logs --no-color --no-log-prefix replay | python3 -m scripts.worker_stats --last 100
+```
+Основные поля:
+
+cycle_ms_avg/max — длительность полного шага до публикации результатов;
+ml_ms_avg, analytics_ms_avg — среднее время этапов;
+cycles_over_step — сколько шагов обрабатывались дольше шага времени потока.
 
 ## Документация
 
