@@ -37,3 +37,18 @@ def test_unmeasured_baseline_does_not_dilute_model_timings():
     assert summarize([record(vehicles=0)])["inference_ms_per_vehicle"] is None
     with pytest.raises(ValueError):
         summarize([], last=0)
+
+
+def test_historical_summary_uses_step_not_sleep_interval():
+    def historical(**changes):
+        line = record(ml_ms=10, analytics_ms=5, step_ms=25, **changes)
+        return line.replace('ML_CYCLE ', 'REPLAY_CYCLE ').replace('"interval_ms": 30, ', '')
+
+    result = summarize([historical(), historical(status='error', cycle_ms=40), historical(cycle_ms=30)])
+    assert result['cycles'] == 3
+    assert result['failed_cycles'] == 1
+    assert result['cycles_over_step'] == 2
+    assert 'cycles_over_interval' not in result
+    assert result['ml_ms_avg'] == 10
+    assert result['analytics_ms_avg'] == 5
+    assert result['vehicles_per_cycle_avg'] == 1

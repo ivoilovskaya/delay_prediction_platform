@@ -1,10 +1,12 @@
 """Advance ML, analytics and the API cursor together through historical inputs."""
 import fcntl
+import json
 import logging
 import math
 import os
 import signal
 import threading
+import time
 import uuid
 
 from analytics.results import initialize as initialize_analytics
@@ -35,16 +37,52 @@ def create_session(request):
 
 
 def advance(state, predictor, step_s):
+    """Выполнить шаг и записать REPLAY_CYCLE, включая публикацию или ошибку.
+
+    cycle_ms не включает загрузку модели, создание сессии и паузу REPLAY_TICK_S.
+    step_ms — продвижение времени потока, а не интервал запуска процесса.
+    """
+    started = time.perf_counter()
+    metrics = {"status": "error", "session": state['session'], "step_ms": step_s * 1000}
+    try:
+        completed = _advance(state, predictor, step_s, metrics)
+        metrics['status'] = 'ok'
+        return completed
+    except Exception as exc:
+        metrics['error'] = type(exc).__name__
+        raise
+    finally:
+        metrics['cycle_ms'] = (time.perf_counter() - started) * 1000
+        log.info('REPLAY_CYCLE %s', json.dumps(metrics))
+
+
+def _advance(state, predictor, step_s, metrics):
     target = state['cursor'] if state['status'] == 'initializing' else min(state['last'], state['cursor'] + step_s)
     # Persist the pending step so a process restart retries that same step.
     target = state.get('pending', target)
+    metrics['T'] = target
     pending = {**state, 'pending': target, 'error': None}
     replay.write_json('state.json', pending)
     cfg = DBConfig(results_url=replay.session_url(state['session']), time_mode='stream')
     engine = existing_engine(cfg.url, readonly=True)
     try:
-        ml_cycle(predictor, engine, cfg, target)
-        analytics_cycle(target, cfg)
+        started = time.perf_counter()
+        try:
+            result = ml_cycle(predictor, engine, cfg, target)
+        finally:
+            metrics['ml_ms'] = (time.perf_counter() - started) * 1000
+        timing = result['model_timing_ms']
+        metrics.update(
+            vehicles=len(result['predictions']),
+            baseline=sum(p.model_used == 'baseline' for p in result['predictions']),
+            skipped=len(result['skipped']), predict_ms=result['timing_ms']['predict'],
+            features_ms=timing.get('features_ms'), inference_ms=timing.get('inference_ms'),
+        )
+        started = time.perf_counter()
+        try:
+            analytics_cycle(target, cfg)
+        finally:
+            metrics['analytics_ms'] = (time.perf_counter() - started) * 1000
     except Exception as exc:
         replay.write_json('state.json', {**pending, 'error': f'{type(exc).__name__}: {exc}'})
         raise

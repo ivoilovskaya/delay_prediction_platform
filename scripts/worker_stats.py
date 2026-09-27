@@ -1,4 +1,4 @@
-"""Сводка ML_CYCLE из файла или stdin: python -m scripts.worker_stats --last 100."""
+"""Сводка ML_CYCLE / REPLAY_CYCLE из файла или stdin: python -m scripts.worker_stats --last 100."""
 from __future__ import annotations
 
 import argparse
@@ -13,6 +13,8 @@ def summarize(lines, last=100):
     cycles = deque(maxlen=last)
     for line in lines:
         _, marker, payload = line.partition("ML_CYCLE ")
+        if not marker:
+            _, marker, payload = line.partition("REPLAY_CYCLE ")
         if not marker:
             continue
         try:
@@ -29,13 +31,13 @@ def summarize(lines, last=100):
         count = sum(r["vehicles"] for r in measured)
         return round(sum(r[key] for r in measured) / count, 3) if count else None
     durations = [r["cycle_ms"] for r in cycles]
-    return {
+    result = {
         "cycles": len(cycles), "failed_cycles": len(cycles) - len(ok),
         "vehicles_per_cycle_avg": mean([r["vehicles"] for r in ok]),
         "vehicles_per_cycle_max": max((r["vehicles"] for r in ok), default=0),
         "cycle_ms_avg": mean(durations),
         "cycle_ms_max": round(max(durations), 3) if durations else None,
-        "cycles_over_interval": sum(r["cycle_ms"] > r["interval_ms"] for r in cycles),
+        "cycles_over_interval": sum(r["cycle_ms"] > r["interval_ms"] for r in cycles if "interval_ms" in r),
         "predict_ms_per_vehicle": per_vehicle("predict_ms"),
         "features_ms_per_vehicle": per_vehicle("features_ms"),
         "inference_ms_per_vehicle": per_vehicle("inference_ms"),
@@ -43,6 +45,16 @@ def summarize(lines, last=100):
         "baseline_predictions": sum(r["baseline"] for r in ok),
         "skipped_vehicles": sum(r["skipped"] for r in ok),
     }
+    historical = [r for r in cycles if "step_ms" in r]
+    if historical:
+        if len(historical) == len(cycles):
+            result.pop("cycles_over_interval")
+        result.update(
+            ml_ms_avg=mean([r["ml_ms"] for r in ok if "ml_ms" in r]),
+            analytics_ms_avg=mean([r["analytics_ms"] for r in ok if "analytics_ms" in r]),
+            cycles_over_step=sum(r["cycle_ms"] > r["step_ms"] for r in historical),
+        )
+    return result
 
 
 def main():

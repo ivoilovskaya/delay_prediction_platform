@@ -162,3 +162,66 @@ def test_live_mode_rejects_replay_control(history, monkeypatch):
     with TestClient(app) as client:
         assert client.get('/replay/status').json() == {'enabled': False}
         assert client.post('/replay/start', json={}).status_code == 409
+
+
+def test_step_metrics_cover_publication_and_failed_retry(history, monkeypatch, caplog):
+    caplog.set_level('INFO', logger='replay')
+    state = start(60)
+    original_write = replay.write_json
+    clock = [0.0]
+    monkeypatch.setattr(coordinator.time, 'perf_counter', lambda: clock[0])
+
+    def timed_write(name, value):
+        original_write(name, value)
+        clock[0] += 0.01
+
+    def timed_ml(*args):
+        from types import SimpleNamespace
+        clock[0] += 0.02
+        return dict(predictions=[SimpleNamespace(model_used='boosting')], skipped=[],
+                    timing_ms={'predict': 12}, model_timing_ms={'features_ms': 8, 'inference_ms': 4})
+
+    def timed_analytics(*args):
+        clock[0] += 0.03
+
+    monkeypatch.setattr(replay, 'write_json', timed_write)
+    monkeypatch.setattr(coordinator, 'ml_cycle', timed_ml)
+    monkeypatch.setattr(coordinator, 'analytics_cycle', timed_analytics)
+    completed = coordinator.advance(state, None, 10)
+    rows = [json.loads(r.message.split('REPLAY_CYCLE ')[1]) for r in caplog.records
+            if 'REPLAY_CYCLE ' in r.message]
+    assert len(rows) == 1
+    assert rows[0]['status'] == 'ok'
+    assert rows[0]['cycle_ms'] == pytest.approx(70)  # includes both state writes
+    assert rows[0]['ml_ms'] == pytest.approx(20)
+    assert rows[0]['analytics_ms'] == pytest.approx(30)
+    assert rows[0]['features_ms'] == 8
+    assert rows[0]['vehicles'] == 1
+    assert rows[0]['session'] == state['session']
+
+    def failed_analytics(*args):
+        clock[0] += 0.04
+        raise RuntimeError('unavailable')
+
+    monkeypatch.setattr(coordinator, 'analytics_cycle', failed_analytics)
+    with pytest.raises(RuntimeError):
+        coordinator.advance(completed, None, 10)
+    failed = json.loads(caplog.records[-1].message.split('REPLAY_CYCLE ')[1])
+    assert failed['status'] == 'error'
+    assert failed['analytics_ms'] == pytest.approx(40)
+    assert failed['cycle_ms'] == pytest.approx(80)
+    assert replay.read_json('state.json')['cursor'] == completed['cursor']
+    monkeypatch.setattr(coordinator, 'analytics_cycle', timed_analytics)
+    resumed = coordinator.advance(replay.read_json('state.json'), None, 10)
+    assert resumed['cursor'] == completed['cursor'] + 10
+
+
+def test_real_step_metrics_with_baseline(history, caplog):
+    caplog.set_level('INFO', logger='replay')
+    coordinator.advance(start(60), None, 10)
+    row = json.loads(next(r.message.split('REPLAY_CYCLE ')[1] for r in caplog.records
+                         if 'REPLAY_CYCLE ' in r.message))
+    assert row['status'] == 'ok'
+    assert row['vehicles'] == row['baseline'] == 1
+    assert row['features_ms'] is None and row['inference_ms'] is None
+    assert row['cycle_ms'] >= row['ml_ms'] + row['analytics_ms']

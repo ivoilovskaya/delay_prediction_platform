@@ -104,3 +104,5 @@ scripts.worker_stats --last 100
 
 - [Код — Sphinx](docs/README.md)
 - [API — OpenAPI / Swagger](docs/API.md)
+
+Измерения производительности: [live и historical](ml/README.md#измерения-в-historical-режиме).
