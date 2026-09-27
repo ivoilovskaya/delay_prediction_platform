@@ -1,4 +1,4 @@
-"""Запуск ML worker и FastAPI на одной базе: python scripts/run_demo.py."""
+"""Запуск ML worker и FastAPI с входной базой и базой результатов: python scripts/run_demo.py."""
 import argparse
 import os
 from pathlib import Path
@@ -42,12 +42,32 @@ def main():
         parser.error('Порт должен быть от 1 до 65535')
 
     if not os.getenv('DATABASE_URL'):
-        parser.error('Нужен DATABASE_URL: сначала создайте/заполните общую базу')
+        parser.error('Нужен DATABASE_URL: сначала создайте/заполните входную базу')
+    sys.path.insert(0, str(ROOT))
+    from ml.db import DBConfig, _q
+    from ml.results_db import existing_engine, initialize
+    from sqlalchemy import text
+    cfg = DBConfig()
+    engine = existing_engine(cfg.url, readonly=True)
+    try:
+        with engine.connect() as conn:
+            for table in (cfg.tel_table, cfg.sch_table):
+                conn.execute(text(f'SELECT 1 FROM {_q(table)} LIMIT 1'))
+    finally:
+        engine.dispose()
+    initialize(cfg)
+    if cfg.results_url:
+        from analytics.results import initialize as initialize_analytics
+        initialize_analytics(cfg)
     commands = [
         ['-m', 'ml.worker'],
         ['-m', 'uvicorn', 'backend.api:app', '--host', '127.0.0.1',
          '--port', str(args.port)],
     ]
+    if cfg.results_url:
+        commands.append(['-m', 'analytics.worker'])
+    if cfg.time_mode == 'wall':
+        commands.append(['-m', 'ml.results_maintenance'])
     if args.ingestion:
         commands.insert(0, ['-m', 'ndtp_ingestion.server'])
     if args.emulator_config:

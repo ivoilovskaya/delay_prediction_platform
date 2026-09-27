@@ -37,3 +37,12 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Check dispatcher scripts
+        run: |
+          node --check frontend/dispatcher/assets/app.js
+          node --test tests/dispatcher-data.test.cjs tests/dispatcher-ui.test.cjs

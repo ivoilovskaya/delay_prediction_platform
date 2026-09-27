@@ -1,8 +1,9 @@
 """Работа ML-модуля с базой: чтение телеметрии и плана, запись прогнозов.
 
-Backend наполняет базу из входных данных (NDTP-поток / исторический датасет),
+Приёмник наполняет базу из входных данных (NDTP-поток / исторический датасет),
 ML-модуль по расписанию читает из неё окно телеметрии и плановое расписание,
-считает прогнозы и пишет их в таблицу ``predictions``. Оттуда их берут
+считает прогнозы и пишет их в таблицу ``predictions`` в RESULTS_DATABASE_URL
+(без этой настройки используется прежняя общая база). Оттуда их берут
 модуль риска/причин и дашборд.
 
 Имена таблиц и колонок настраиваются переменными окружения (значения по
@@ -65,6 +66,7 @@ class DBConfig:
     """Настройки доступа к базе; по умолчанию — из переменных окружения."""
 
     url: str = field(default_factory=lambda: _env("DATABASE_URL", ""))
+    results_url: str = field(default_factory=lambda: _env("RESULTS_DATABASE_URL", ""))
     tel_table: str = field(default_factory=lambda: _env("ML_TELEMETRY_TABLE", "telemetry"))
     tel_tr: str = field(default_factory=lambda: _env("ML_TEL_TR_ID", "tr_id"))
     tel_time: str = field(default_factory=lambda: _env("ML_TEL_TIME", "event_time"))
@@ -202,7 +204,7 @@ def load_states(engine, cfg: DBConfig, T: float) -> tuple[list[dict], list[dict]
 
 
 def predictions_table(cfg: DBConfig):
-    """Описание таблицы прогнозов (создаётся автоматически, если её нет)."""
+    """Описание таблицы прогнозов; явное создание через ml.results_db."""
     from sqlalchemy import BigInteger, Boolean, Column, DateTime, Float, Integer, MetaData, String, Table, UniqueConstraint
 
     md = MetaData()
@@ -228,7 +230,8 @@ def predictions_table(cfg: DBConfig):
 def write_predictions(engine, cfg: DBConfig, preds) -> int:
     """Дописать прогнозы в таблицу ``predictions`` (история сохраняется)."""
     tbl = predictions_table(cfg)
-    tbl.metadata.create_all(engine, checkfirst=True)
+    if not cfg.results_url:  # legacy single-database commands
+        tbl.metadata.create_all(engine, checkfirst=True)
     rows = [{
         "tr_id": p.tr_id, "t_forecast": _ts(p.T), "predicted_at": _ts(p.predicted_at),
         "target_stop_id": p.target_stop_id, "target_time_plan": _ts(p.target_time_plan),
@@ -277,7 +280,17 @@ def run_cycle(predictor, engine, cfg: DBConfig, T: Optional[float] = None, write
         preds = [baseline_prediction(s, None, "hint" if s.get("cur_dev_s") is not None else "stream",
                                      "модель не загружена") for s in states]
     t_pred = time.perf_counter()
-    written = write_predictions(engine, cfg, preds) if write else 0
+    written = 0
+    if write:
+        if cfg.results_url:
+            from ml.results_db import existing_engine
+            results_engine = existing_engine(cfg.results_url)
+            try:
+                written = write_predictions(results_engine, cfg, preds)
+            finally:
+                results_engine.dispose()
+        else:
+            written = write_predictions(engine, cfg, preds)
     t_end = time.perf_counter()
     return {"T": T, "predictions": preds, "skipped": skipped, "written": written,
             "timing_ms": {"read": round((t_read - t0) * 1000, 1), "predict": round((t_pred - t_read) * 1000, 1),

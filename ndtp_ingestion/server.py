@@ -68,20 +68,18 @@ def save_point(point):
 def retentions():
     telemetry_s = float(os.getenv('TELEMETRY_RETENTION_S', '7200'))
     schedule_s = float(os.getenv('SCHEDULE_RETENTION_S', '21600'))
-    predictions_s = float(os.getenv('PREDICTIONS_RETENTION_S', '86400'))
-    if telemetry_s < float(os.getenv('ML_WINDOW_S', '2700')) + 60 or schedule_s < 21600 or predictions_s <= 0:
+    if telemetry_s < float(os.getenv('ML_WINDOW_S', '2700')) + 60 or schedule_s < 21600:
         raise ValueError('Сроки хранения слишком малы для ML')
-    return telemetry_s, schedule_s, predictions_s
+    return telemetry_s, schedule_s
 
 
 def cleanup(now=None):
     now = time.time() if now is None else now
-    telemetry_s, schedule_s, predictions_s = retentions()
+    telemetry_s, schedule_s = retentions()
     result = {}
     with connect() as conn:
         for table, field, age in [('telemetry', 'receive_time', telemetry_s),
-                                  ('schedule_plan', 'time_begin', schedule_s),
-                                  ('predictions', 'predicted_at', predictions_s)]:
+                                  ('schedule_plan', 'time_begin', schedule_s)]:
             result[table] = conn.execute(f'DELETE FROM {table} WHERE {field} < ?', (stamp(now - age),)).rowcount
     return result
 

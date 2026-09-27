@@ -46,7 +46,7 @@ def get_active_vehicles():
     try:
         return fleet_snapshot()
     except SQLAlchemyError as exc:
-        raise HTTPException(status_code=503, detail="База телеметрии недоступна") from exc
+        raise HTTPException(status_code=503, detail="База телеметрии или прогнозов недоступна") from exc
 
 
 @router.get("/predictions/latest")

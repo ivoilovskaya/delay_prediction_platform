@@ -1,4 +1,4 @@
-"""Общая SQLite-база обработчика, ML и API."""
+"""Входная SQLite-база: только телеметрия и план."""
 import os
 import sqlite3
 from pathlib import Path
@@ -19,7 +19,6 @@ def connect():
 
 
 def init_db():
-    from ml.db import DBConfig, make_engine, predictions_table
     db_path().parent.mkdir(parents=True, exist_ok=True)
     with connect() as conn:
         conn.execute('PRAGMA journal_mode=WAL')
@@ -42,15 +41,6 @@ def init_db():
             fields = {r['name'] for r in conn.execute(f'PRAGMA table_info({table})')}
             if not required <= fields:
                 raise ValueError(f'{table}: несовместимая старая схема; укажите новую базу через --db')
-    cfg = DBConfig()
-    engine = make_engine(cfg)
-    try:
-        predictions_table(cfg).metadata.create_all(engine)
-        with connect() as conn:
-            conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_predictions_vehicle_time_stop '
-                         'ON predictions(tr_id, t_forecast, target_stop_id)')
-    finally:
-        engine.dispose()
 
 
 if __name__ == '__main__':
