@@ -15,7 +15,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><svg class="brand-mark" viewBox="100 145 210 245" role="img" aria-label="Знак Московского транспорта"><image href="/dispatcher/assets/moscow-transport-logo.png" x="0" y="0" width="720" height="516" /></svg><div><strong>Диспетчерская</strong><small>Московский транспорт</small></div></div>
+    <div class="brand"><svg class="brand-mark" viewBox="100 145 210 245" role="img" aria-label="Знак Московского транспорта"><defs><filter id="logo-red-only" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  2 -2 0 0 0" /></filter></defs><image href="/dispatcher/assets/moscow-transport-logo.png" x="0" y="0" width="720" height="516" filter="url(#logo-red-only)" /></svg><div><strong>Диспетчерская</strong><small>Московский транспорт</small></div></div>
     <div class="top-status"><span id="data-mode">Подключение…</span><span id="last-update">—</span><button id="refresh" type="button" aria-label="Обновить данные">Обновить</button></div>
   </header>
   <main class="layout">
