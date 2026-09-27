@@ -3,7 +3,7 @@
 ## 1. Клонировать проект
 
 ```bash
-git clone <URL_РЕПОЗИТОРИЯ>
+git clone https://github.com/valentinesvev/delay_prediction_platform.git
 cd delay_prediction_platform
 ```
 
