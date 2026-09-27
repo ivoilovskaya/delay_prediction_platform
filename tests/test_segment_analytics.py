@@ -77,6 +77,9 @@ def test_passage_and_api_keep_input_read_only(tmp_path, monkeypatch):
         assert {row["segment_id"] for row in response.json()["segments"]} == {
             "m1:outbound:0", "m1:outbound:1"}
         assert client.get("/analytics/alerts").status_code == 200
+        vehicles = client.get("/analytics/vehicles")
+        assert vehicles.status_code == 200
+        assert vehicles.json()["vehicles"][0]["tr_id"] == 42
     # The current ten-minute window is never used to establish its own norm.
     with sqlite3.connect(output_file) as db:
         for tr_id, travel in ((43, 110), (44, 130)):

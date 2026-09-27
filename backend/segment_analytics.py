@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from sqlalchemy import func, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from analytics.results import alerts, segment_state
+from analytics.results import alerts, segment_state, vehicle_state
 from storage.database import existing_engine
 
 
@@ -60,3 +60,15 @@ def active_alerts():
     rows = _read(alerts, select(alerts).where(alerts.c.status == "ACTIVE")
                  .order_by(alerts.c.updated_at.desc()))
     return {"status": "ready" if rows else "empty", "alerts": rows}
+
+
+@router.get("/vehicles")
+def matched_vehicles():
+    """Current route assignment for each bus; GPS positions remain in /vehicles/active."""
+    statement = select(
+        vehicle_state.c.tr_id, vehicle_state.c.event_time,
+        vehicle_state.c.route_id, vehicle_state.c.direction_id,
+        vehicle_state.c.segment_id, vehicle_state.c.match_status,
+        vehicle_state.c.match_confidence,
+    )
+    return {"vehicles": _read(vehicle_state, statement)}
