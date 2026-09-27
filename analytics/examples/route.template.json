@@ -1,0 +1,26 @@
+{
+  "route_id": "demo-route-1",
+  "route_name": "Демо: маршрут 1",
+  "is_demo": true,
+  "directions": [
+    {
+      "direction_id": "outbound",
+      "stops": [
+        {"stop_id": "stop-a", "name": "Остановка А", "lat": 55.7500, "lon": 37.5000},
+        {"stop_id": "stop-b", "name": "Остановка Б", "lat": 55.7500, "lon": 37.5100},
+        {"stop_id": "stop-c", "name": "Остановка В", "lat": 55.7500, "lon": 37.5200}
+      ],
+      "planned_travel_sec": [300, 300]
+    },
+    {
+      "direction_id": "inbound",
+      "stops": [
+        {"stop_id": "stop-c", "name": "Остановка В", "lat": 55.7500, "lon": 37.5200},
+        {"stop_id": "stop-b", "name": "Остановка Б", "lat": 55.7500, "lon": 37.5100},
+        {"stop_id": "stop-a", "name": "Остановка А", "lat": 55.7500, "lon": 37.5000}
+      ],
+      "planned_travel_sec": [300, 300]
+    }
+  ],
+  "assignments": []
+}

@@ -56,6 +56,7 @@ def test_launcher_initializes_before_processes(tmp_path, monkeypatch, mode):
     def launch(command, **_):
         with sqlite3.connect(f'file:{results}?mode=ro', uri=True) as conn:
             assert conn.execute('SELECT COUNT(*) FROM predictions').fetchone()[0] == 0
+            assert conn.execute('SELECT COUNT(*) FROM segment_state').fetchone()[0] == 0
         commands.append(command)
         return Process()
     monkeypatch.setattr(run_demo.subprocess, 'Popen', launch)
@@ -63,3 +64,4 @@ def test_launcher_initializes_before_processes(tmp_path, monkeypatch, mode):
     monkeypatch.setattr(sys, 'argv', ['run_demo'])
     assert run_demo.main() == 0
     assert any('ml.results_maintenance' in c for c in commands) == (mode == 'wall')
+    assert any('analytics.worker' in c for c in commands)

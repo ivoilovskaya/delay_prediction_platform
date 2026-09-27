@@ -5,7 +5,7 @@
   let snapshot = {time:'—', vehicles:[]}, metadata = {}, connected = false, loading = false, pollTimer = null;
   const $ = id => document.getElementById(id);
   const state = {selected:null, filter:'all', query:'', mapStyle:'positron', gps:true, stops:true, segmentIndex:null, scope:'all', threshold:300};
-  let map = null, vehicleLayer = null, trackLayer = null, tiles = null, styleLayer = null;
+  let map = null, vehicleLayer = null, trackLayer = null, segmentAnalyticsLayer = null, tiles = null, styleLayer = null;
   const issueColors = { normal:'#a7a4a0', warning:'#e5a32b', critical:'#ca2437', blocked:'#4d2630' };
   const icon = '<svg aria-hidden="true"><use href="#bus-icon"/></svg>';
   const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -107,8 +107,33 @@
     tiles.on('load', () => { if (!tileErrors) mapMessage(''); });
     vehicleLayer = L.layerGroup().addTo(map);
     trackLayer = L.layerGroup().addTo(map);
+    segmentAnalyticsLayer = L.layerGroup().addTo(map);
     setMapStyle(state.mapStyle);
   }
+
+  window.DispatcherSegmentMap = {
+    update(rows, selectedRoute) {
+      if (!map || !segmentAnalyticsLayer) return;
+      segmentAnalyticsLayer.clearLayers();
+      const visible = selectedRoute ? rows.filter(row => row.route_id === selectedRoute) : rows.filter(row => row.severity !== 'NORMAL');
+      visible.forEach(row => {
+        const color = row.severity === 'CRITICAL' || row.severity === 'WARNING' ? '#c92039' : row.severity === 'WATCH' ? '#e5a32b' : '#547b80';
+        const coords = [[row.from_lat, row.from_lon], [row.to_lat, row.to_lon]];
+        const label = document.createElement('span');
+        label.textContent = `${row.route_name}: ${row.from_name} → ${row.to_name} · ${row.severity}`;
+        L.polyline(coords, {color:'#fff', weight:12, opacity:.95, interactive:false}).addTo(segmentAnalyticsLayer);
+        L.polyline(coords, {color, weight:7, opacity:.95}).bindTooltip(label).addTo(segmentAnalyticsLayer);
+        if (row.severity === 'WARNING' || row.severity === 'CRITICAL') {
+          const center = [(row.from_lat + row.to_lat)/2, (row.from_lon + row.to_lon)/2];
+          L.marker(center, {icon:L.divIcon({html:'<span class="issue-marker critical">!</span>',className:'issue-pin',iconSize:[34,34],iconAnchor:[17,17]}),title:label.textContent}).bindTooltip(label).addTo(segmentAnalyticsLayer);
+        }
+      });
+    },
+    focus(row) {
+      if (map) map.fitBounds(L.latLngBounds([[row.from_lat,row.from_lon],[row.to_lat,row.to_lon]]), {padding:[90,90],maxZoom:15,animate:false});
+      mapStage.scrollIntoView({behavior:'smooth',block:'center'});
+    }
+  };
 
   function routeSegments(v) {
     if (!v?.stops?.length) return [];
