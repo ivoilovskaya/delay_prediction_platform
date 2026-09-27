@@ -5,15 +5,8 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 
 
-def existing_engine(url, *, readonly=False):
-    """SQLite URI mode prevents accidental creation (including a check/open race)."""
-    parsed = make_url(url)
-    if parsed.get_backend_name() == 'sqlite':
-        if not parsed.database or parsed.database == ':memory:':
-            raise ValueError('Results database must be a persistent SQLite file')
-        uri = Path(parsed.database).resolve().as_uri()
-        parsed = parsed.set(database=uri, query={**parsed.query, 'mode': 'ro' if readonly else 'rw', 'uri': 'true'})
-    return create_engine(parsed, pool_pre_ping=True)
+# Compatibility import for existing local callers.
+from storage.database import existing_engine
 
 
 def initialize(cfg=None):

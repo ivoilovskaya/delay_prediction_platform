@@ -50,9 +50,9 @@ python -m ndtp_ingestion.server
 | telemetry | `receive_time` старше 2 часов | `TELEMETRY_RETENTION_S=7200` |
 | schedule_plan | `time_begin` старше 6 часов; будущий план сохраняется | `SCHEDULE_RETENTION_S=21600` |
 
-Прогнозы в `RESULTS_DATABASE_URL` обслуживает отдельный процесс
-`python -m ml.results_maintenance`: `PREDICTIONS_RETENTION_S=86400`,
-`RESULTS_CLEANUP_INTERVAL_S=600`. В `ML_TIME_MODE=stream` он ничего не удаляет.
+Все таблицы результатов в `RESULTS_DATABASE_URL` обслуживает отдельный процесс
+`python -m maintenance.results`: `PREDICTIONS_RETENTION_S=86400`,
+`RESULTS_CLEANUP_INTERVAL_S=600`. В `DATA_TIME_MODE=stream` он ничего не удаляет.
 Приёмник не создаёт и не очищает `predictions`. Перед запуском ML/API выполните
 `python -m ml.results_db`; общий `scripts/run_demo.py` делает это автоматически.
 

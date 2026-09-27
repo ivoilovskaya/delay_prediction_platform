@@ -8,7 +8,7 @@ import argparse
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert
 from ml.db import DBConfig, predictions_table
-from ml.results_db import existing_engine
+from storage.database import existing_engine
 
 
 def migrate(source_url, cfg=None):

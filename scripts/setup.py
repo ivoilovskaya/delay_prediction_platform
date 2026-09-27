@@ -84,7 +84,7 @@ def main():
     os.environ['DATABASE_URL'] = 'sqlite:///' + str(db)
     command = [sys.executable, 'scripts/run_demo.py', '--port', str(args.port)]
     if args.mode == 'historical':
-        os.environ['ML_TIME_MODE'] = 'stream'
+        os.environ['ML_TIME_MODE'] = os.environ['DATA_TIME_MODE'] = 'stream'
         if not db.exists():
             subprocess.run([sys.executable, '-m', 'ml.csv_to_db', '--data', 'data/dataset', '--url', os.environ['DATABASE_URL']], check=True)
         else:
@@ -96,7 +96,7 @@ def main():
     else:
         from ndtp_ingestion.db_init import init_db
         from ndtp_ingestion.load_schedule import load_schedule
-        os.environ['ML_TIME_MODE'] = 'wall'
+        os.environ['ML_TIME_MODE'] = os.environ['DATA_TIME_MODE'] = 'wall'
         os.environ['DEMO_PLAN'] = '1' if args.demo_plan else '0'
         os.environ.setdefault('ML_INTERVAL_S', '10')
         if args.demo_plan:

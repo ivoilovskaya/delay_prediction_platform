@@ -3,7 +3,7 @@ name: delay-platform
 x-environment: &environment
   DATABASE_URL: sqlite:////data/input/input.db
   RESULTS_DATABASE_URL: sqlite:////data/results/results.db
-  ML_TIME_MODE: wall
+  DATA_TIME_MODE: wall
   MODEL_TYPE: ${MODEL_TYPE:-ensemble}
   ML_INTERVAL_S: ${ML_INTERVAL_S:-10}
   ML_WINDOW_S: ${ML_WINDOW_S:-2700}
@@ -12,7 +12,9 @@ x-environment: &environment
 
 x-app: &app
   image: delay-prediction-platform:local
-  build: .
+  build:
+    context: .
+    target: application
   init: true
   restart: unless-stopped
   stop_grace_period: 15s
@@ -24,7 +26,9 @@ x-app: &app
 services:
   prepare:
     image: delay-prediction-platform:local
-    build: .
+    build:
+      context: .
+      target: application
     init: true
     restart: "no"
     environment: *environment
@@ -55,6 +59,22 @@ services:
       - input-data:/data/input
       - results-data:/data/results
 
+  analytics:
+    <<: *app
+    command: ["python", "-m", "analytics.worker"]
+    environment:
+      <<: *environment
+      ANALYTICS_INTERVAL_S: ${ANALYTICS_INTERVAL_S:-30}
+      ANALYTICS_CORRIDOR_M: ${ANALYTICS_CORRIDOR_M:-150}
+      ANALYTICS_ACTIVE_S: ${ANALYTICS_ACTIVE_S:-120}
+      ANALYTICS_RECENT_S: ${ANALYTICS_RECENT_S:-600}
+      ANALYTICS_SLOWDOWN_RATIO: ${ANALYTICS_SLOWDOWN_RATIO:-1.4}
+      ANALYTICS_MIN_BASELINE_N: ${ANALYTICS_MIN_BASELINE_N:-3}
+      ANALYTICS_MIN_CONFIRMING: ${ANALYTICS_MIN_CONFIRMING:-2}
+    volumes:
+      - input-data:/data/input
+      - results-data:/data/results
+
   ingestion:
     <<: *app
     command: ["python", "-m", "ndtp_ingestion.server"]
@@ -79,12 +99,27 @@ services:
 
   results-maintenance:
     <<: *app
-    command: ["python", "-m", "ml.results_maintenance"]
+    image: delay-results-maintenance:local
+    build:
+      context: .
+      target: maintenance
+    command: ["python", "-m", "maintenance.results"]
     environment:
       RESULTS_DATABASE_URL: sqlite:////data/results/results.db
-      ML_TIME_MODE: wall
-      PREDICTIONS_RETENTION_S: ${PREDICTIONS_RETENTION_S:-86400}
+      DATA_TIME_MODE: wall
       RESULTS_CLEANUP_INTERVAL_S: ${RESULTS_CLEANUP_INTERVAL_S:-600}
+      PREDICTIONS_RETENTION_S: ${PREDICTIONS_RETENTION_S:-86400}
+      PREDICTIONS_CLEANUP_INTERVAL_S: ${PREDICTIONS_CLEANUP_INTERVAL_S:-${RESULTS_CLEANUP_INTERVAL_S:-600}}
+      VEHICLE_STATE_RETENTION_S: ${VEHICLE_STATE_RETENTION_S:-86400}
+      VEHICLE_STATE_CLEANUP_INTERVAL_S: ${VEHICLE_STATE_CLEANUP_INTERVAL_S:-${RESULTS_CLEANUP_INTERVAL_S:-600}}
+      SEGMENT_PASSAGES_RETENTION_S: ${SEGMENT_PASSAGES_RETENTION_S:-2592000}
+      SEGMENT_PASSAGES_CLEANUP_INTERVAL_S: ${SEGMENT_PASSAGES_CLEANUP_INTERVAL_S:-${RESULTS_CLEANUP_INTERVAL_S:-600}}
+      SEGMENT_BASELINE_RETENTION_S: ${SEGMENT_BASELINE_RETENTION_S:-2592000}
+      SEGMENT_BASELINE_CLEANUP_INTERVAL_S: ${SEGMENT_BASELINE_CLEANUP_INTERVAL_S:-${RESULTS_CLEANUP_INTERVAL_S:-600}}
+      SEGMENT_STATE_RETENTION_S: ${SEGMENT_STATE_RETENTION_S:-86400}
+      SEGMENT_STATE_CLEANUP_INTERVAL_S: ${SEGMENT_STATE_CLEANUP_INTERVAL_S:-${RESULTS_CLEANUP_INTERVAL_S:-600}}
+      ALERTS_RETENTION_S: ${ALERTS_RETENTION_S:-604800}
+      ALERTS_CLEANUP_INTERVAL_S: ${ALERTS_CLEANUP_INTERVAL_S:-${RESULTS_CLEANUP_INTERVAL_S:-600}}
     volumes:
       - results-data:/data/results
 

@@ -13,7 +13,7 @@ flowchart TB
     W -->|"predictions"| R[("RESULTS_DATABASE_URL: results.db")]
     SW -->|"состояние участков и предупреждения"| R
     R -->|чтение| A
-    C["ml.results_maintenance: только wall"] -->|очистка predicted_at| R
+    C["maintenance.results: только wall"] -->|очистка всех таблиц результатов| R
     DB -->|чтение| A["FastAPI backend.api"]
     A --> UI["Интерфейс диспетчера"]
 ```
@@ -28,14 +28,15 @@ flowchart TB
 зависимости; ML работает на CPU. Модель и интерфейс включены в образ приложения,
 локальные базы, CSV, `.env` и виртуальные окружения в образ не копируются.
 
-### Пять работающих контейнеров
+### Шесть работающих контейнеров
 
 | Сервис Compose | Назначение | Данные |
 |---|---|---|
 | `backend` | FastAPI и интерфейс на http://127.0.0.1:8000 | Читает входные данные и прогнозы; результаты смонтированы только для чтения |
 | `worker` | ML по таймеру, по умолчанию каждые 10 с | Читает `input.db`, пишет `results.db` |
+| `analytics` | Расчёт состояний участков, норм и предупреждений | Читает телеметрию и ручные маршруты, пишет аналитику в `results.db` |
 | `ingestion` | TCP-приёмник NDTP и очистка входных данных | Только `input.db`: `telemetry`, `schedule_plan` |
-| `results-maintenance` | Удаление прогнозов старше срока хранения | Только `results.db`, по `predicted_at`; по умолчанию сутки |
+| `results-maintenance` | Независимая очистка всех шести таблиц результатов | Только `results.db`; у каждой таблицы свой срок хранения и интервал |
 | `emulator` | Генерация телеметрии трёх демонстрационных ТС | Отправляет TCP-пакеты в `ingestion:9000` |
 
 Ещё два служебных контейнера **завершаются после подготовки**, а не работают
@@ -44,8 +45,11 @@ flowchart TB
 В `docker compose ps -a` их нормальное состояние — `Exited (0)`.
 Ошибка подготовки блокирует запуск зависимых сервисов.
 
-Backend, worker, приёмник, обслуживание и подготовка используют один образ
-`delay-prediction-platform:local` с разными командами запуска. Процессы приложения
+Backend, ML worker, аналитика, приёмник и подготовка используют образ
+`delay-prediction-platform:local` с разными командами запуска. Обслуживание использует
+отдельный лёгкий образ `delay-results-maintenance:local` (Python + SQLAlchemy),
+без пакетов `ml`, `analytics`, NumPy и PyTorch. Его можно запускать и останавливать
+независимо от вычислительных процессов; код подключения находится в `storage.database`. Процессы приложения
 работают от пользователя `app` (UID 10001), не от root. Эмулятор использует
 поставляемый образ `ndtp-telemetry-emulator:1.0`. Контейнеры общаются по внутренней
 сети Compose: Docker socket и host networking им не нужны. Наружу опубликован
@@ -61,7 +65,7 @@ Backend, worker, приёмник, обслуживание и подготов�
 docker load -i data/dataset/ndtp-telemetry-emulator.tar
 ```
 
-Запуск пяти сервисов и подготовительных шагов:
+Запуск шести сервисов и подготовительных шагов:
 
 ```bash
 docker compose up -d --build
@@ -131,12 +135,100 @@ docker compose run --rm --no-deps emulator-config
 `ML_WINDOW_S`, `PREDICTION_MAX_AGE_SECONDS`, `CLEANUP_INTERVAL_S`,
 `TELEMETRY_RETENTION_S`, `SCHEDULE_RETENTION_S`, `PREDICTIONS_RETENTION_S`,
 `RESULTS_CLEANUP_INTERVAL_S`. После изменения примените `docker compose up -d`.
-Живой Compose всегда использует `ML_TIME_MODE=wall`.
+Живой Compose всегда использует `DATA_TIME_MODE=wall`.
+
+### Подключение ручных маршрутов к аналитике
+
+При подготовке Compose создаёт также таблицы результатов аналитики. Без ручного
+маршрута и назначений ТС новый блок интерфейса показывает пустое состояние.
+Синтетический план эмулятора не выдаётся за маршрут: эти определения не импортируются
+автоматически. Подготовьте JSON по [инструкции аналитики](analytics/README.md), затем:
+
+```bash
+docker compose run --rm --no-deps \
+  --volume /absolute/path/to/route.json:/route.json:ro \
+  analytics python -m analytics.routes --file /route.json
+docker compose logs -f analytics
+```
+
+Для уже запущенного проекта с другим именем (например, `delay-live`) добавляйте
+`-p delay-live` ко всем командам Compose. Аналитика читает маршруты в следующем
+цикле; пересборка образа не нужна.
+
+### Обслуживание базы результатов
+
+**Это отдельный процесс и отдельный контейнер, а не часть ML worker или приёмника.**
+Команда запуска — `python -m maintenance.results`. Он работает с `RESULTS_DATABASE_URL`;
+при отсутствии адреса поддерживает прежнюю общую базу через `DATABASE_URL`, но
+удаляет только записи перечисленных ниже таблиц результатов. Входные таблицы,
+определения маршрутов и назначения транспорта не затрагиваются.
+
+| Таблица | Возраст считается по | Срок по умолчанию | Переменная срока хранения |
+|---|---|---|---|
+| `predictions` | `predicted_at` | 1 сутки | `PREDICTIONS_RETENTION_S=86400` |
+| `vehicle_state` | `event_time` | 1 сутки | `VEHICLE_STATE_RETENTION_S=86400` |
+| `segment_passages` | `exited_at` | 30 суток | `SEGMENT_PASSAGES_RETENTION_S=2592000` |
+| `segment_baseline` | `updated_at` | 30 суток | `SEGMENT_BASELINE_RETENTION_S=2592000` |
+| `segment_state` | `calculated_at` | 1 сутки | `SEGMENT_STATE_RETENTION_S=86400` |
+| `alerts` | `updated_at` | 7 суток | `ALERTS_RETENTION_S=604800` |
+
+**Срок хранения и частота очистки — разные настройки.** Проверка всех таблиц
+выполняется сразу при старте, затем по умолчанию каждые 600 секунд
+(`RESULTS_CLEANUP_INTERVAL_S`). Для отдельного расписания задайте
+`PREDICTIONS_CLEANUP_INTERVAL_S`, `VEHICLE_STATE_CLEANUP_INTERVAL_S`,
+`SEGMENT_PASSAGES_CLEANUP_INTERVAL_S`, `SEGMENT_BASELINE_CLEANUP_INTERVAL_S`,
+`SEGMENT_STATE_CLEANUP_INTERVAL_S` или `ALERTS_CLEANUP_INTERVAL_S`.
+Неуказанные интервалы наследуют общий. Все значения — положительные конечные
+числа в секундах. Пример `.env`:
+
+```dotenv
+RESULTS_CLEANUP_INTERVAL_S=600
+PREDICTIONS_RETENTION_S=86400
+SEGMENT_PASSAGES_RETENTION_S=2592000
+SEGMENT_PASSAGES_CLEANUP_INTERVAL_S=3600
+ALERTS_RETENTION_S=604800
+ALERTS_CLEANUP_INTERVAL_S=300
+```
+
+Так прогнозы проверяются раз в 10 минут, история прохождений — раз в час,
+предупреждения — раз в 5 минут. Изменения применяются пересозданием только сервиса:
+
+```bash
+docker compose up -d --no-deps results-maintenance
+docker compose logs -f results-maintenance
+# Остановить только обслуживание:
+docker compose stop results-maintenance
+# Разовый проход по всем таблицам, независимо от их интервалов:
+docker compose run --rm --no-deps results-maintenance python -m maintenance.results --once
+```
+
+В журнале указываются таблица, число удалённых записей, срок и интервал. При ошибке
+одной таблицы остальные продолжают обслуживаться; повтор — через 30 секунд или
+раньше, если её интервал меньше. Отсутствующий файл базы не создаётся. Отсутствующие
+таблицы пропускаются (поддерживается старая база только с прогнозами). Для новой,
+пока неизвестной таблицы выводится предупреждение: нужно явно добавить правило
+с её временным полем, произвольные данные автоматически не удаляются.
+
+Удаляются записи **старше** срока; на самой границе запись остаётся. Для предупреждений
+учитывается последнее обновление, а не дата первого появления: актуальное предупреждение
+сохраняется. После закрытия его время больше не обновляется бесконечно. Записи норм,
+которые аналитика продолжает пересчитывать, также остаются актуальными. Удаление
+старых прохождений ограничивает историю, по которой пересчитывается норма.
+
+Общий режим времени теперь задаётся `DATA_TIME_MODE=wall|stream`. Если он не указан,
+сохраняется совместимость с `ML_TIME_MODE`. В режиме `stream` удаление **полностью
+отключено**, в том числе при ручном `--once`; исторический Compose вообще не запускает
+обслуживание. Совместимая команда `python -m ml.results_maintenance` оставлена как
+переадресация, но новый код не импортирует ML.
+
+Очистка удаляет строки, а не файл базы и не её схему. SQLite переиспользует освобождённые
+страницы; размер `.db` на диске не обязан сразу уменьшаться. Автоматический `VACUUM`,
+блокирующий запись, не запускается.
 
 ### Исторический режим в Docker
 
-Отдельный файл Compose запускает только Backend, worker и завершающийся `prepare`.
-Приёмника, эмулятора и очистки результатов здесь нет; `ML_TIME_MODE=stream`.
+Отдельный файл Compose запускает Backend, ML worker, analytics worker и завершающийся `prepare`.
+Приёмника, эмулятора и очистки результатов здесь нет; `DATA_TIME_MODE=stream`.
 Проект называется `delay-history`, поэтому volumes отделены от живого режима.
 CSV из `data/dataset` монтируются только для чтения и импортируются лишь при
 отсутствии входной базы. Если файл базы есть, но схема повреждена, подготовка
@@ -206,7 +298,7 @@ bash scripts/setup_and_run.sh --help
 
 Оценка текущей задержки строится по GPS и плану, а не передаётся эмулятором. При недостатке данных показывается «—». «На линии по плану» — состояние по доступной телеметрии/плану, не подтверждение выпуска диспетчером. Номера маршрутов в текущем контракте нет; показывается ID ТС. Остановка отображается по адресу из плана либо ID.
 
-Приёмник очищает только входную базу: телеметрия хранится 2 часа по времени получения, прошедшие строки плана — 6 часов по плановому времени. Отдельный процесс `ml.results_maintenance` удаляет прогнозы старше суток по `predicted_at`; период задаёт `RESULTS_CLEANUP_INTERVAL_S` (600), срок — `PREDICTIONS_RETENTION_S` (86400). Сроки настраиваются в `.env.example` и передаются переменными окружения. Исторический режим приёмник и очистку не запускает.
+Приёмник очищает только входную базу: телеметрия хранится 2 часа по времени получения, прошедшие строки плана — 6 часов по плановому времени. Отдельный процесс `maintenance.results` очищает все таблицы результатов по правилам из раздела «Обслуживание базы результатов» выше. Сроки настраиваются в `.env.example` и передаются переменными окружения. Исторический режим приёмник и очистку не запускает.
 
 Старое тестовое демо с отдельными `backend/prediction_worker.py`, `data/ingestion.py`, `data/storage.py` и `ml/pipeline.py` удалено. Исторический режим выше использует актуальные ML-модели и две базы, поэтому сохраняется как самостоятельная проверка без эмулятора.
 
@@ -228,12 +320,12 @@ mkdir -p artifacts
 [ -f artifacts/input.db ] || python -m ml.csv_to_db --data data/dataset --url sqlite:///artifacts/input.db
 export DATABASE_URL=sqlite:///artifacts/input.db
 export RESULTS_DATABASE_URL=sqlite:///artifacts/results.db
-export ML_TIME_MODE=stream
+export DATA_TIME_MODE=stream
 python -m ml.results_db
 python scripts/run_demo.py
 ```
 
-На Windows активируйте виртуальное окружение своей командой, затем задайте `DATABASE_URL`, `RESULTS_DATABASE_URL` и `ML_TIME_MODE` средствами вашей оболочки. Откройте `http://127.0.0.1:8000/`, API доступен в `/docs`. `ml.csv_to_db` **заменяет** таблицы `telemetry` и `schedule_plan` по переданному URL; не запускайте повторную загрузку в базу с нужной вам живой историей. Файл `artifacts/input.db` не коммитится.
+На Windows активируйте виртуальное окружение своей командой, затем задайте `DATABASE_URL`, `RESULTS_DATABASE_URL` и `DATA_TIME_MODE` средствами вашей оболочки. Откройте `http://127.0.0.1:8000/`, API доступен в `/docs`. `ml.csv_to_db` **заменяет** таблицы `telemetry` и `schedule_plan` по переданному URL; не запускайте повторную загрузку в базу с нужной вам живой историей. Файл `artifacts/input.db` не коммитится.
 На macOS обычная установка `requirements.txt` установит сборку PyTorch для macOS. Для первого запуска потребуются загрузка библиотек и несколько гигабайт свободного места.
 
 Для одного цикла без постоянного процесса:
@@ -242,7 +334,7 @@ python scripts/run_demo.py
 python -m ml.worker --once
 ```
 
-Для живого потока установите `ML_TIME_MODE=wall` и подайте во входную базу свежую валидированную телеметрию и актуальный план. Без этих таблиц worker не сможет рассчитать прогноз. `ML_INTERVAL_S` (по умолчанию 30 секунд) задаёт интервал расчётов, `PREDICTION_MAX_AGE_SECONDS` (90 секунд) — порог свежести API. Образец настроек — `.env.example`; этот файл автоматически не загружается. Имена таблиц/полей для ML настраиваются в `ml.db.DBConfig`.
+Для живого потока установите `DATA_TIME_MODE=wall` и подайте во входную базу свежую валидированную телеметрию и актуальный план. Без этих таблиц worker не сможет рассчитать прогноз. `ML_INTERVAL_S` (по умолчанию 30 секунд) задаёт интервал расчётов, `PREDICTION_MAX_AGE_SECONDS` (90 секунд) — порог свежести API. Образец настроек — `.env.example`; этот файл автоматически не загружается. Имена таблиц/полей для ML настраиваются в `ml.db.DBConfig`.
 
 ## HTTP API бэкенда
 
@@ -317,13 +409,15 @@ bash scripts/setup_and_run.sh --mode emulator --demo-plan
 ```bash
 export DATABASE_URL=sqlite:///artifacts/input.db
 export RESULTS_DATABASE_URL=sqlite:///artifacts/results.db
-export ML_TIME_MODE=stream  # wall для живого потока
+export DATA_TIME_MODE=stream  # wall для живого потока
 python -m ml.results_db
+python -m analytics.results
 # В отдельных терминалах с теми же переменными:
 python -m ml.worker
+python -m analytics.worker
 python -m uvicorn backend.api:app --host 127.0.0.1 --port 8000
 # Только в живом режиме:
-python -m ml.results_maintenance
+python -m maintenance.results
 # Приёмник требует NDTP_UNIT_MAP; создаёт только входные таблицы:
 python -m ndtp_ingestion.server
 ```
@@ -348,7 +442,7 @@ python -m ndtp_ingestion.server
 ```bash
 export DATABASE_URL=sqlite:///artifacts/demo.db
 export RESULTS_DATABASE_URL=sqlite:///artifacts/results.db
-export ML_TIME_MODE=stream
+export DATA_TIME_MODE=stream
 python -m ml.results_db
 python -m ml.migrate_predictions --source sqlite:///artifacts/demo.db
 python scripts/run_demo.py

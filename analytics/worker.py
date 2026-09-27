@@ -12,6 +12,7 @@ import math
 import os
 import signal
 import statistics
+import threading
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -21,7 +22,7 @@ from sqlalchemy import and_, inspect, select, text
 
 from analytics import results, routes
 from ml.db import DBConfig, _param, _q, current_T
-from ml.results_db import existing_engine
+from storage.database import existing_engine
 
 log = logging.getLogger("analytics.worker")
 VERSION = "segment-v1"
@@ -351,7 +352,8 @@ def _state_for_segment(conn, segment, T, settings):
     existing = conn.execute(select(results.alerts).where(
         results.alerts.c.segment_id == seg_id,
         results.alerts.c.alert_type == "SEGMENT_SLOWDOWN")).mappings().first()
-    if severity != "NORMAL" or existing:
+    # Do not refresh resolved alerts forever: maintenance ages them by updated_at.
+    if severity != "NORMAL" or (existing and existing["status"] == "ACTIVE"):
         alert_values = dict(route_id=segment["route_id"], direction_id=segment["direction_id"],
                             severity=severity, confidence_level=level, current_value=median_current,
                             baseline_value=baseline, vehicles_confirming=confirming,
@@ -405,16 +407,15 @@ def main() -> None:
     if args.at and not args.once:
         parser.error("--at requires --once")
     logging.basicConfig(level=logging.INFO)
-    stop = False
+    stop = threading.Event()
 
     def shut_down(*_):
-        nonlocal stop
-        stop = True
+        stop.set()
 
     signal.signal(signal.SIGINT, shut_down)
     signal.signal(signal.SIGTERM, shut_down)
     backoff = 1.0
-    while not stop:
+    while not stop.is_set():
         try:
             result = run_cycle(_epoch(args.at) if args.at else None)
             log.info("Analytics cycle: %s", result)
@@ -423,7 +424,7 @@ def main() -> None:
             log.exception("Analytics cycle failed")
             if args.once:
                 raise
-            time.sleep(backoff)
+            stop.wait(backoff)
             backoff = min(60.0, backoff * 2)
             continue
         if args.once:
@@ -431,7 +432,7 @@ def main() -> None:
         interval = float(os.getenv("ANALYTICS_INTERVAL_S", "30"))
         if not math.isfinite(interval) or interval <= 0:
             raise ValueError("ANALYTICS_INTERVAL_S must be positive")
-        time.sleep(interval)
+        stop.wait(interval)
 
 
 if __name__ == "__main__":

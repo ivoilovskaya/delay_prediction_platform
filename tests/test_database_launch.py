@@ -63,5 +63,5 @@ def test_launcher_initializes_before_processes(tmp_path, monkeypatch, mode):
     monkeypatch.setattr(run_demo.signal, 'signal', lambda *_: None)
     monkeypatch.setattr(sys, 'argv', ['run_demo'])
     assert run_demo.main() == 0
-    assert any('ml.results_maintenance' in c for c in commands) == (mode == 'wall')
+    assert any('maintenance.results' in c for c in commands) == (mode == 'wall')
     assert any('analytics.worker' in c for c in commands)

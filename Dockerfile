@@ -1,4 +1,16 @@
-FROM python:3.12-slim
+# Maintenance can run without the ml/analytics packages or model dependencies.
+FROM python:3.12-slim AS maintenance
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /app
+RUN pip install --no-cache-dir 'sqlalchemy>=2.0,<3'
+COPY storage/ storage/
+COPY maintenance/ maintenance/
+RUN useradd --uid 10001 --create-home app \
+    && mkdir -p /data/results && chown -R app:app /data
+USER app
+CMD ["python", "-m", "maintenance.results"]
+
+FROM python:3.12-slim AS application
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -10,6 +22,9 @@ COPY requirements-ml.txt ./
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements-ml.txt \
     && pip check
+COPY storage/ storage/
+COPY maintenance/ maintenance/
+COPY analytics/ analytics/
 COPY ml/ ml/
 COPY backend/ backend/
 COPY ndtp_ingestion/ ndtp_ingestion/

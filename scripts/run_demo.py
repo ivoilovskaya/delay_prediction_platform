@@ -45,7 +45,8 @@ def main():
         parser.error('Нужен DATABASE_URL: сначала создайте/заполните входную базу')
     sys.path.insert(0, str(ROOT))
     from ml.db import DBConfig, _q
-    from ml.results_db import existing_engine, initialize
+    from ml.results_db import initialize
+    from storage.database import existing_engine
     from sqlalchemy import text
     cfg = DBConfig()
     engine = existing_engine(cfg.url, readonly=True)
@@ -67,7 +68,7 @@ def main():
     if cfg.results_url:
         commands.append(['-m', 'analytics.worker'])
     if cfg.time_mode == 'wall':
-        commands.append(['-m', 'ml.results_maintenance'])
+        commands.append(['-m', 'maintenance.results'])
     if args.ingestion:
         commands.insert(0, ['-m', 'ndtp_ingestion.server'])
     if args.emulator_config:

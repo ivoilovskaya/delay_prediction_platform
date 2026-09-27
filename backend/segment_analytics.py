@@ -10,7 +10,7 @@ from sqlalchemy import func, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from analytics.results import alerts, segment_state
-from ml.results_db import existing_engine
+from storage.database import existing_engine
 
 
 router = APIRouter(prefix="/analytics", tags=["segment analytics"])

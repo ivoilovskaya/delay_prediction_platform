@@ -63,7 +63,10 @@ def prepare(mode, runtime, dataset):
             finally:
                 os.environ['DATABASE_URL'] = original_url
         print(f'Input database prepared: {path}', flush=True)
-    initialize(DBConfig())
+    cfg = DBConfig()
+    initialize(cfg)
+    from analytics.results import initialize as initialize_analytics
+    initialize_analytics(cfg)
     print('Results schema ready; existing predictions preserved.', flush=True)
 
 

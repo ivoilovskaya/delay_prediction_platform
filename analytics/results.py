@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, MetaData, String, Table, UniqueConstraint
+from sqlalchemy import Index, Boolean, Column, DateTime, Float, Integer, MetaData, String, Table, UniqueConstraint
 
-from ml.db import DBConfig
-from ml.results_db import existing_engine
+from storage.database import DatabaseConfig as DBConfig
+from storage.database import existing_engine
 
 
 metadata = MetaData()
@@ -113,13 +113,25 @@ alerts = Table(
 )
 
 
+# Retention scans must remain bounded as the history grows.
+for table, column in ((vehicle_state, 'event_time'), (segment_passages, 'exited_at'),
+                      (segment_baseline, 'updated_at'), (segment_state, 'calculated_at'),
+                      (alerts, 'updated_at')):
+    Index(f'ix_{table.name}_{column}', table.c[column])
+Index('ix_segment_passages_segment_exit', segment_passages.c.segment_id, segment_passages.c.exited_at)
+
+
 def initialize(cfg: DBConfig | None = None) -> None:
     cfg = cfg or DBConfig()
     if not cfg.results_url or cfg.results_url == cfg.url:
         raise ValueError("Analytics requires a separate RESULTS_DATABASE_URL")
     engine = existing_engine(cfg.results_url)
     try:
-        metadata.create_all(engine)
+        with engine.begin() as conn:
+            metadata.create_all(conn)
+            for table in metadata.tables.values():
+                for index in table.indexes:
+                    index.create(conn, checkfirst=True)
     finally:
         engine.dispose()
 

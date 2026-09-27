@@ -7,7 +7,7 @@ services:
       service: prepare
     command: ["python", "-m", "scripts.container_setup", "historical", "--dataset", "/dataset"]
     environment:
-      ML_TIME_MODE: stream
+      DATA_TIME_MODE: stream
       DEMO_PLAN: "0"
     volumes:
       - type: bind
@@ -21,15 +21,23 @@ services:
       file: compose.yaml
       service: backend
     environment:
-      ML_TIME_MODE: stream
+      DATA_TIME_MODE: stream
       DEMO_PLAN: "0"
   worker:
     extends:
       file: compose.yaml
       service: worker
     environment:
-      ML_TIME_MODE: stream
+      DATA_TIME_MODE: stream
       DEMO_PLAN: "0"
+  analytics:
+    extends:
+      file: compose.yaml
+      service: analytics
+    environment:
+      DATA_TIME_MODE: stream
+      DEMO_PLAN: "0"
+
 volumes:
   input-data:
   results-data:

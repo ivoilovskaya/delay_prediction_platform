@@ -24,6 +24,9 @@ def snapshot(path):
 def test_live_bootstrap_and_restart_preserve_plan_and_predictions(paths, monkeypatch):
     source, results, runtime = paths
     prepare('emulator', runtime, Path('/not-used'))
+    with sqlite3.connect(results) as conn:
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert names == {'predictions', 'vehicle_state', 'segment_passages', 'segment_baseline', 'segment_state', 'alerts'}
     config = json.loads((runtime / 'emulator.json').read_text())
     assert config['targetHost'] == 'ingestion'
     assert config['targetPort'] == 9000

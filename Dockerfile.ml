@@ -9,6 +9,8 @@ COPY requirements-ml.txt .
 # CPU-сборка PyTorch (~200 МБ вместо ~2 ГБ с CUDA); для GPU-хоста уберите --index-url
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
     && pip install --no-cache-dir -r requirements-ml.txt
+COPY storage/ storage/
+COPY maintenance/ maintenance/
 COPY ml/ ml/
 COPY artifacts/model/ artifacts/model/
 

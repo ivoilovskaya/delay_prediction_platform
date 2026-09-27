@@ -32,10 +32,12 @@ ML-модуль по расписанию читает из неё окно те
 ``ML_CURDEV_TABLE``        ``''`` (нет)                 необязательно: текущая задержка ТС
 ``ML_CURDEV_TR_ID/VALUE``  ``tr_id`` / ``cur_dev_s``    колонки этой таблицы
 ``ML_PREDICTIONS_TABLE``   ``predictions``              куда писать прогнозы
-``ML_TIME_MODE``           ``stream``                   ``stream`` — T = последняя точка в
+``DATA_TIME_MODE``         ``stream``                   ``stream`` — T = последняя точка в
                                                         базе (реплей), ``wall`` — текущее время
 ``ML_WINDOW_S``            ``2700``                     окно телеметрии, сек (45 мин)
 =========================  ===========================  =====================================
+
+При отсутствии DATA_TIME_MODE используется прежняя настройка ML_TIME_MODE.
 
 Все времена в базе трактуются как **UTC** (как в датасете).
 """
@@ -51,6 +53,9 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from storage.database import (DatabaseConfig, create_database_engine, quote_identifier,
+                              timestamp_parameter, utc_datetime)
+
 from ml.feature_engineering import VehiclePlan, VehicleTrack, select_target
 
 PLAN_BACK_S = 6 * 3600   # план берём за 6 ч назад (начало текущего рейса) …
@@ -62,11 +67,9 @@ def _env(name: str, default: str) -> str:
 
 
 @dataclass
-class DBConfig:
+class DBConfig(DatabaseConfig):
     """Настройки доступа к базе; по умолчанию — из переменных окружения."""
 
-    url: str = field(default_factory=lambda: _env("DATABASE_URL", ""))
-    results_url: str = field(default_factory=lambda: _env("RESULTS_DATABASE_URL", ""))
     tel_table: str = field(default_factory=lambda: _env("ML_TELEMETRY_TABLE", "telemetry"))
     tel_tr: str = field(default_factory=lambda: _env("ML_TEL_TR_ID", "tr_id"))
     tel_time: str = field(default_factory=lambda: _env("ML_TEL_TIME", "event_time"))
@@ -86,18 +89,14 @@ class DBConfig:
     curdev_table: str = field(default_factory=lambda: _env("ML_CURDEV_TABLE", ""))
     curdev_tr: str = field(default_factory=lambda: _env("ML_CURDEV_TR_ID", "tr_id"))
     curdev_value: str = field(default_factory=lambda: _env("ML_CURDEV_VALUE", "cur_dev_s"))
-    pred_table: str = field(default_factory=lambda: _env("ML_PREDICTIONS_TABLE", "predictions"))
-    time_mode: str = field(default_factory=lambda: _env("ML_TIME_MODE", "stream"))
     window_s: float = field(default_factory=lambda: float(_env("ML_WINDOW_S", "2700")))
 
 
 def make_engine(cfg: DBConfig):
     """SQLAlchemy engine с проверкой соединения перед использованием (переживает рестарт БД)."""
-    from sqlalchemy import create_engine
-
     if not cfg.url:
         raise RuntimeError("DATABASE_URL не задан")
-    return create_engine(cfg.url, pool_pre_ping=True, future=True)
+    return create_database_engine(cfg.url)
 
 
 def _unix(s: pd.Series) -> np.ndarray:
@@ -110,17 +109,16 @@ def _unix(s: pd.Series) -> np.ndarray:
 
 def _ts(t: float) -> datetime:
     """unix → наивный datetime UTC (так он сравнивается с колонками без зоны)."""
-    return datetime.fromtimestamp(t, tz=timezone.utc).replace(tzinfo=None)
+    return utc_datetime(t)
 
 
 def _param(engine, t: float):
     """Параметр времени для WHERE. В SQLite время хранится строкой — сравниваем в том же формате."""
-    d = _ts(t)
-    return d.strftime("%Y-%m-%d %H:%M:%S.%f") if engine.dialect.name == "sqlite" else d
+    return timestamp_parameter(engine, t)
 
 
 def _q(name: str) -> str:
-    return '"' + name.replace('"', '""') + '"'
+    return quote_identifier(name)
 
 
 def current_T(engine, cfg: DBConfig) -> Optional[float]:
@@ -283,7 +281,7 @@ def run_cycle(predictor, engine, cfg: DBConfig, T: Optional[float] = None, write
     written = 0
     if write:
         if cfg.results_url:
-            from ml.results_db import existing_engine
+            from storage.database import existing_engine
             results_engine = existing_engine(cfg.results_url)
             try:
                 written = write_predictions(results_engine, cfg, preds)
