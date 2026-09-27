@@ -6,10 +6,10 @@
   const $ = id => document.getElementById(id);
   const state = {selected:null, filter:'all', query:'', mapStyle:'positron', gps:true, stops:true, segmentIndex:null, scope:'all', threshold:300};
   let map = null, vehicleLayer = null, trackLayer = null, segmentAnalyticsLayer = null, tiles = null, styleLayer = null;
-  const issueColors = { normal:'#a7a4a0', warning:'#e5a32b', critical:'#ca2437', blocked:'#4d2630' };
+  const issueColors = { normal:'#368563', unknown:'#a7a4a0', warning:'#e5a32b', critical:'#ca2437', blocked:'#4d2630' };
   const icon = '<svg aria-hidden="true"><use href="#bus-icon"/></svg>';
   const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const frame = () => snapshot;
+  const frame = () => ({...snapshot, vehicles:snapshot.vehicles.map(v => ({...v, forecast:Data.fresh(v, connected) ? v.forecast : null}))});
   const delayText = seconds => seconds == null ? '—' : `${seconds > 0 ? '+' : seconds < 0 ? '−' : ''}${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(Math.abs(seconds) / 60)} мин`;
   const inScope = v => state.scope === 'all' || state.scope === 'east' && v.position[1] >= 37.7 || state.scope === 'south' && v.position[0] < 55.7;
   const scopedVehicles = () => frame().vehicles.filter(inScope);
@@ -21,7 +21,6 @@
     const s = signal(v);
     if (s.kind === 'late') return {label:'Текущая задержка ≥ порога', tone:'red'};
     if (s.kind === 'risk') return {label:'Прогноз задержки ≥ порога', tone:'amber'};
-    if (v.forecast && !fresh(v)) return {label:'Прогноз устарел', tone:'gray'};
     if (v.routeStatus === 'off_route') return {label:'Далеко от плана', tone:'gray'};
     if (!v.hasSchedule) return {label:'Нет плана', tone:'gray'};
     if (!v.forecast) return {label:'Ожидаем прогноз', tone:'gray'};
@@ -115,18 +114,15 @@
     update(rows, selectedRoute) {
       if (!map || !segmentAnalyticsLayer) return;
       segmentAnalyticsLayer.clearLayers();
-      const visible = selectedRoute ? rows.filter(row => row.route_id === selectedRoute) : rows.filter(row => row.severity !== 'NORMAL');
+      const visible = selectedRoute ? rows.filter(row => row.route_id === selectedRoute) : rows;
       visible.forEach(row => {
-        const color = row.severity === 'CRITICAL' || row.severity === 'WARNING' ? '#c92039' : row.severity === 'WATCH' ? '#e5a32b' : '#547b80';
+        const color = '#a7a4a0';
         const coords = [[row.from_lat, row.from_lon], [row.to_lat, row.to_lon]];
         const label = document.createElement('span');
-        label.textContent = `${row.route_name}: ${row.from_name} → ${row.to_name} · ${row.severity}`;
+        label.textContent = `${row.route_name}: ${row.from_name} → ${row.to_name} · схема маршрута`;
         L.polyline(coords, {color:'#fff', weight:12, opacity:.95, interactive:false}).addTo(segmentAnalyticsLayer);
-        L.polyline(coords, {color, weight:7, opacity:.95}).bindTooltip(label).addTo(segmentAnalyticsLayer);
-        if (row.severity === 'WARNING' || row.severity === 'CRITICAL') {
-          const center = [(row.from_lat + row.to_lat)/2, (row.from_lon + row.to_lon)/2];
-          L.marker(center, {icon:L.divIcon({html:'<span class="issue-marker critical">!</span>',className:'issue-pin',iconSize:[34,34],iconAnchor:[17,17]}),title:label.textContent}).bindTooltip(label).addTo(segmentAnalyticsLayer);
-        }
+        L.polyline(coords, {color, weight:3, opacity:.5}).bindTooltip(label).addTo(segmentAnalyticsLayer);
+
       });
     },
     focus(row) {
@@ -136,27 +132,21 @@
   };
 
   function routeSegments(v) {
-    if (!v?.stops?.length) return [];
-    const points = v.age > 120 ? [...v.stops] : [{ position: v.position, address: 'Положение автобуса', time: frame().time }, ...v.stops];
-    const segments = points.slice(1).map((stop, index) => ({ index, from: points[index], to: stop }));
-    if (!segments.length) return segments;
-    const targetIndex = v.stops.findIndex(stop => stop.position[0] === v.forecast?.target?.[0] && stop.position[1] === v.forecast?.target?.[1]);
-    const incidentIndex = Math.min(segments.length - 1, Math.max(0, targetIndex - (v.age > 120 ? 1 : 0)));
-    let incident = null;
-    const sig = signal(v);
-    if (sig.kind === 'late') {
-      incident = {tone:'critical', label:'Оценка задержки ≥ порога', note:`${delayText(v.currentDelay)} по GPS и плану · причина неизвестна`};
-    } else if (sig.kind === 'risk' && targetIndex >= 0) {
-      incident = {tone:'warning', label:'Прогноз задержки ≥ порога', note:`${delayText(v.forecast.delay)} к целевой остановке · это не вероятность сбоя`};
-    }
-    return segments.map(segment => ({...segment, issue:segment.index === incidentIndex ? incident : null, color:segment.index === incidentIndex && incident ? issueColors[incident.tone] : issueColors.normal }));
+    return Data.routeSegments(v, state.threshold, connected).map(segment => {
+      const issue = segment.tone === 'critical'
+        ? {tone:'critical', label:'Задержка сейчас ≥ порога', note:`Сейчас ≈ ${delayText(v.currentDelay)}${fresh(v) ? ` · прогноз ${delayText(v.forecast.delay)}` : ''} · причина не установлена`}
+        : segment.tone === 'warning'
+          ? {tone:'warning', label:'Прогнозируется задержка ≥ порога', note:`Прогноз ${delayText(v.forecast.delay)} · причина не установлена`}
+          : null;
+      return {...segment, issue, color:issueColors[segment.tone]};
+    });
   }
 
   function renderSegments() {
     const v = frame().vehicles.find(item => item.id === state.selected);
     const latest = v?.track?.at(-1);
     const lastPair = latest?.length >= 2 ? latest.slice(-2) : null;
-    const currentColor = signal(v).kind === 'late' ? '#ca2437' : signal(v).kind === 'risk' ? '#e5a32b' : '#4e1930';
+    const currentColor = connected && v?.age <= 120 && Number.isFinite(v.currentDelay) ? (v.currentDelay >= state.threshold ? '#ca2437' : '#368563') : '#a7a4a0';
     $('current-gps-segment').style.setProperty('--current-color', currentColor);
     $('current-gps-segment').innerHTML = lastPair && v.age <= 120
       ? `<span class="gps-now-badge">СЕЙЧАС / GPS</span><strong>Текущий отрезок движения автобуса ${escapeHTML(v.id)}</strong><span>Последние две записанные точки · ${escapeHTML(v.lastSeen)} · ${escapeHTML(v.speed)} км/ч</span><small>Название улицы и границы дорожного участка в данных не указаны. Отрезок выделен на карте.</small>`
@@ -166,7 +156,7 @@
       $('segment-list').innerHTML = '<p class="segment-empty">Для этого автобуса нет ближайших точек расписания. Можно посмотреть записанный GPS‑путь на карте.</p>';
       return;
     }
-    $('segment-list').innerHTML = segments.map(s => `<button type="button" class="segment-card ${s.issue ? `segment-${s.issue.tone}` : ''}" data-segment-index="${s.index}" aria-pressed="${s.index === state.segmentIndex}" style="--segment-color:${s.color}"><span class="segment-number">${String(s.index + 1).padStart(2, '0')}</span><span class="segment-line"><i></i><i></i></span><strong>${escapeHTML(s.from.address)} → ${escapeHTML(s.to.address)}</strong><small>${escapeHTML(s.from.time)} — ${escapeHTML(s.to.time)} · ${s.issue ? escapeHTML(s.issue.label) : 'без сигнала'}</small></button>`).join('');
+    $('segment-list').innerHTML = segments.map(s => `<button type="button" class="segment-card ${s.issue ? `segment-${s.issue.tone}` : ''}" data-segment-index="${s.index}" aria-pressed="${s.index === state.segmentIndex}" style="--segment-color:${s.color}"><span class="segment-number">${String(s.index + 1).padStart(2, '0')}</span><span class="segment-line"><i></i><i></i></span><strong>${escapeHTML(s.from.address)} → ${escapeHTML(s.to.address)}</strong><small>${escapeHTML(s.from.time)} — ${escapeHTML(s.to.time)} · ${s.issue ? escapeHTML(s.issue.label) : s.tone === 'normal' ? 'ниже порога' : 'недостаточно данных'}</small></button>`).join('');
   }
 
   function renderIncident() {
@@ -181,7 +171,7 @@
     }
     banner.className = `incident-banner incident-${segment.issue.tone}`;
     banner.disabled = false;
-    banner.innerHTML = `<span class="incident-symbol">${segment.issue.tone === 'blocked' ? '×' : '!'}</span><span><strong>${escapeHTML(segment.issue.label)}</strong><small>${escapeHTML(segment.from.address)} → ${escapeHTML(segment.to.address)}</small><em>${escapeHTML(segment.issue.note)}</em></span><b aria-hidden="true">↗</b>`;
+    banner.innerHTML = `<span class="incident-symbol">${segment.issue.tone === 'blocked' ? '×' : '!'}</span><span><strong>ТС ${escapeHTML(v.id)} · ${escapeHTML(segment.issue.label)}</strong><small>${escapeHTML(segment.from.address)} → ${escapeHTML(segment.to.address)}</small><em>${escapeHTML(segment.issue.note)}</em></span><b aria-hidden="true">↗</b>`;
   }
 
   function renderVerdict() {
@@ -192,7 +182,7 @@
     const tone = !connected ? 'normal' : late ? 'critical' : risk ? 'warning' : 'normal';
     const title = !connected ? 'Ожидаем соединение с сервером' : !vehicles.length ? 'Нет свежей телеметрии' : late ? 'Есть транспорт с текущей задержкой' : risk ? 'Прогнозируется задержка выше порога' : 'Нет сигналов выше порога';
     $('verdict-panel').className = `verdict-panel verdict-${tone}`;
-    $('verdict-panel').innerHTML = `<div class="verdict-main"><span class="verdict-overline">ОБЗОР / ${metadata.mode === 'historical' ? 'ИСТОРИЧЕСКАЯ БАЗА' : 'ДАННЫЕ БАЗЫ'}</span><strong>${title}</strong><p>Порог: ${state.threshold / 60} мин. Текущая задержка — оценка по GPS; прогноз — сохранённый результат модели. Причины и вероятность сбоя не определяются.</p></div><div class="verdict-stats"><div><b>${connected ? late : '—'}</b><span>Текущая задержка<br>≥ порога</span></div><div><b>${connected ? risk : '—'}</b><span>Прогноз<br>≥ порога</span></div><div><b>${count}</b><span>Свежих<br>прогнозов</span></div></div>`;
+    $('verdict-panel').innerHTML = `<div class="verdict-main"><span class="verdict-overline">ОБЗОР / ${metadata.mode === 'historical' ? 'ИСТОРИЧЕСКАЯ БАЗА' : 'ДАННЫЕ БАЗЫ'}</span><strong>${title}</strong><p>Порог: ${state.threshold / 60} мин. Красный — задержка сейчас, жёлтый — прогноз задержки. Текущая задержка оценивается по GPS и расписанию.</p></div><div class="verdict-stats"><div><b>${connected ? late : '—'}</b><span>Текущая задержка<br>≥ порога</span></div><div><b>${connected ? risk : '—'}</b><span>Прогноз<br>≥ порога</span></div><div><b>${count}</b><span>Свежих<br>прогнозов</span></div></div>`;
   }
 
   function visibleVehicles() {
@@ -217,7 +207,7 @@
       const s = status(v), f = v.forecast;
       const address = f?.address || v.stops[0]?.address || (v.hasSchedule ? 'Нет ближайших точек расписания' : 'Расписание отсутствует');
       const sig = signal(v);
-      return `<button type="button" class="vehicle-card signal-${sig.kind}" data-vehicle="${escapeHTML(v.id)}" aria-pressed="${v.id === state.selected}" aria-controls="vehicle-detail"><div class="vehicle-top"><span class="bus-mini">${icon}</span><div><div class="vehicle-name">Автобус ${escapeHTML(v.id)}</div><div class="vehicle-caption">${f ? 'Прогноз из базы · ' + escapeHTML(f.model) : 'Данные телеметрии'}</div></div></div><p class="vehicle-address">${escapeHTML(address)}</p><span class="status-chip ${s.tone}">${s.label}</span><div class="card-bottom" style="margin-top:14px"><span>${f ? `К ${f.plan} МСК` : `Координаты: ${v.lastSeen}`}</span><strong>${f ? delayText(f.delay) : '—'}</strong></div></button>`;
+      return `<button type="button" class="vehicle-card signal-${sig.kind}" data-vehicle="${escapeHTML(v.id)}" aria-pressed="${v.id === state.selected}" aria-controls="vehicle-detail"><div class="vehicle-top"><span class="bus-mini">${icon}</span><div><div class="vehicle-name">Автобус ${escapeHTML(v.id)}</div><div class="vehicle-caption">${f ? 'Есть актуальный прогноз' : 'Нет актуального прогноза'}</div></div></div><p class="vehicle-address">${escapeHTML(address)}</p><span class="status-chip ${s.tone}">${s.label}</span><div class="card-bottom" style="margin-top:14px"><span>${f ? `К ${f.plan} МСК` : `Координаты: ${v.lastSeen}`}</span><strong>${f ? delayText(f.delay) : '—'}</strong></div></button>`;
     }).join('');
   }
 
@@ -230,13 +220,11 @@
     body += `<p class="detail-sub">${v.currentStop ? 'Рядом с остановкой' : 'Следующая остановка'}: ${escapeHTML(nearby?.address || 'нет данных')}</p>`;
     body += `<div class="arrival-grid"><div><span>Задержка сейчас ≈</span><b>${delayText(v.currentDelay)}</b></div><div><span>Прогноз задержки</span><b>${delayText(f?.delay)}</b></div><div><span>Ожидаемое прибытие</span><b>${f?.arrival || '—'}</b></div></div>`;
     if (f) {
-      body += `<p class="detail-address">${escapeHTML(f.address)}</p><p class="detail-sub">План: ${f.plan} МСК · рассчитано: ${f.calculated} МСК · ${escapeHTML(f.model)}</p>`;
-      if (!fresh(v)) body += '<p class="detail-warning">Прогноз устарел или связь с сервером потеряна. Он показан справочно.</p>';
+      body += `<p class="detail-address">${escapeHTML(f.address)}</p><p class="detail-sub">План: ${f.plan} МСК · рассчитано: ${f.calculated} МСК</p>`;
       if (f.degraded) body += '<p class="detail-warning">Прогноз рассчитан при неполной телеметрии.</p>';
-      if (f.reason || f.model === 'baseline') body += `<p class="detail-warning">Резервный расчёт: ${escapeHTML(f.reason || 'baseline')}</p>`;
       if (f.interval.every(Number.isFinite)) body += `<p class="detail-sub">Интервал задержки: ${delayText(f.interval[0])} … ${delayText(f.interval[1])}</p>`;
     } else {
-      body += '<p class="detail-empty">Прогноза пока нет: ожидаем воркер или плановую остановку в окне +10…15 минут. Транспорт показан по телеметрии.</p>';
+      body += '<p class="detail-empty">Прогноза пока нет.</p>';
     }
     body += `<div class="detail-foot"><span>Координаты: ${ageText(v.age)}</span><span>Скорость: ${v.speed == null ? '—' : escapeHTML(v.speed) + ' км/ч'} · МСК</span></div>`;
     $('vehicle-detail').innerHTML = body;
@@ -252,21 +240,36 @@
       const marker = L.marker(v.position, { icon: L.divIcon({html,className:'bus-pin',iconSize:selected?[46,46]:[40,40],iconAnchor:selected?[23,23]:[20,20]}),title:`Автобус ${v.id}${v.age > 120 ? ', координаты устарели' : ''}`,alt:`Автобус ${v.id}`,zIndexOffset:selected?1000:0 }).addTo(vehicleLayer);
       marker.on('click', () => choose(v.id));
     });
+    const network = new Map();
+    if (state.stops) {
+      const rank = {unknown:0, normal:1, warning:2, critical:3};
+      scopedVehicles().forEach(bus => routeSegments(bus).forEach(segment => {
+        const key = JSON.stringify([segment.from.position, segment.to.position]);
+        if (!network.has(key) || rank[segment.tone] > rank[network.get(key).tone]) network.set(key, segment);
+      }));
+      [...network.values()].sort((a,b) => rank[a.tone] - rank[b.tone]).forEach(s => {
+        const label = document.createElement('span');
+        label.textContent = `${s.from.address} → ${s.to.address} · ${s.issue?.label || (s.tone === 'normal' ? 'ниже порога' : 'недостаточно данных')}`;
+        L.polyline([s.from.position, s.to.position], {color:s.color, weight:5, opacity:.8, dashArray:'6 7'}).bindTooltip(label).addTo(trackLayer);
+      });
+    }
     const v = frame().vehicles.find(v => v.id === state.selected);
     if (!v) return;
     if (state.gps) v.track.forEach(segment => {
       L.polyline(segment, {color:'#fff',weight:11,opacity:.98,interactive:false}).addTo(trackLayer);
-      L.polyline(segment, {color:'#ac1832',weight:6,opacity:.98,interactive:false}).addTo(trackLayer);
+      L.polyline(segment, {color:'#667780',weight:6,opacity:.98,interactive:false}).addTo(trackLayer);
     });
     const latest = v.track?.at(-1);
     if (state.gps && v.age <= 120 && latest?.length >= 2) {
       const pair = latest.slice(-2);
       L.polyline(pair,{color:'#fff',weight:17,opacity:1,interactive:false}).addTo(trackLayer);
-      const currentColor = signal(v).kind === 'late' ? '#ca2437' : signal(v).kind === 'risk' ? '#e5a32b' : '#4e1930';
+      const currentColor = connected && v?.age <= 120 && Number.isFinite(v.currentDelay) ? (v.currentDelay >= state.threshold ? '#ca2437' : '#368563') : '#a7a4a0';
       L.polyline(pair,{color:currentColor,weight:11,opacity:1,interactive:false}).bindTooltip('Текущий GPS-отрезок').addTo(trackLayer);
     }
     if (state.stops) {
-      routeSegments(v).forEach(s => {
+      routeSegments(v).forEach(local => {
+        const shared = network.get(JSON.stringify([local.from.position, local.to.position]));
+        const s = {...local, color:shared?.color || local.color, issue:shared?.issue || local.issue};
         const active = s.index === state.segmentIndex;
         L.polyline([s.from.position, s.to.position], {color:'#fff',weight:s.issue || active?13:8,opacity:.96,interactive:false}).addTo(trackLayer);
         L.polyline([s.from.position, s.to.position], {color:s.color,weight:s.issue || active?8:4,opacity:active?1:.9,dashArray:s.issue?'10 5':'5 9',interactive:false}).addTo(trackLayer);
@@ -283,8 +286,8 @@
     }
     if (v.forecast?.target) {
       const tooltip = document.createElement('div');
-      tooltip.textContent = `${v.forecast.address} · прогноз ${delayText(v.forecast.delay)}${fresh(v) ? '' : ' (устарел)'} к ${v.forecast.plan}`;
-      L.circleMarker(v.forecast.target,{radius:10,color:'#dc3447',weight:3,fillColor:'#fff',fillOpacity:1}).bindTooltip(tooltip,{permanent:true,direction:'bottom',offset:[0,12]}).addTo(trackLayer);
+      tooltip.textContent = `${v.forecast.address} · прогноз ${delayText(v.forecast.delay)} к ${v.forecast.plan}`;
+      L.circleMarker(v.forecast.target,{radius:10,color:v.forecast.delay >= state.threshold ? '#e5a32b' : '#368563',weight:3,fillColor:'#fff',fillOpacity:1}).bindTooltip(tooltip,{permanent:true,direction:'bottom',offset:[0,12]}).addTo(trackLayer);
     }
     if (focus) {
       const issue = routeSegments(v).find(segment => segment.issue);
@@ -331,7 +334,7 @@
       const historical = data.mode === 'historical';
       $('mode-label').textContent = data.replay ? 'ИСТОРИЧЕСКОЕ ВОСПРОИЗВЕДЕНИЕ' : historical ? 'ИСТОРИЧЕСКАЯ БАЗА' : 'ЖИВОЙ ПОТОК';
       $('score-source').textContent = historical ? 'СОСТОЯНИЕ НА ВРЕМЯ ТЕЛЕМЕТРИИ' : 'ТЕЛЕМЕТРИЯ · FASTAPI';
-      $('data-source').textContent = (data.replay ? 'Историческое воспроизведение: время карты, прогнозов и аналитики движется вместе. ' : historical ? 'Исторический режим: состояние на момент последней точки базы. ' : 'Живые данные: транспорт с достоверной точкой за последние 2 минуты. ') + (data.demo_plan ? 'ДЕМО: искусственное расписание и случайное движение эмулятора; это не проверка точности модели.' : 'API читает сохранённые прогнозы из базы результатов.');
+      $('data-source').textContent = (data.replay ? 'Историческое воспроизведение: время карты, прогнозов и аналитики движется вместе. ' : historical ? 'Исторический режим: состояние на момент последней точки базы. ' : 'Живые данные: транспорт с достоверной точкой за последние 2 минуты. ') + (data.demo_plan ? 'ДЕМО: искусственное расписание и случайное движение эмулятора; это не проверка точности модели.' : '');
       const ready = snapshot.vehicles.filter(fresh).length;
       badge.className = `server-status server-${ready ? 'ready' : 'unavailable'}`;
       badge.textContent = `FastAPI подключён · ТС: ${snapshot.vehicles.length} · свежих прогнозов: ${ready}`;

@@ -41,3 +41,47 @@ test('fallback metadata is preserved and null delay is not converted to zero',()
   assert.equal(v.currentDelay,null); assert.equal(v.forecast.model,'baseline');
   assert.equal(v.forecast.reason,'model failed'); assert.equal(v.forecast.degraded,true);
 });
+
+test('stale forecasts are removed, current delay remains available', () => {
+  const data=input();
+  data.vehicles[0].prediction.status='stale';
+  data.vehicles[0].current_delay_s=400;
+  const v=Data.adapt(data).vehicles[0];
+  assert.equal(v.forecast,null);
+  assert.equal(Data.signal(v,300).kind,'late');
+});
+
+test('red marks current segment, yellow marks target; unknown future stays gray', () => {
+  const data=input();
+  data.vehicles[0].stops.unshift({id:8,position:[55.77,37.55],name:'Ближайшая',planned_time:'2026-09-27T10:05:00Z'});
+  const v=Data.adapt(data).vehicles[0];
+  v.currentDelay=400;
+  assert.deepEqual(Data.routeSegments(v,300).map(s=>s.tone),['critical','warning']);
+  v.currentDelay=0;
+  assert.deepEqual(Data.routeSegments(v,300).map(s=>s.tone),['normal','warning']);
+  v.forecast=null;
+  assert.deepEqual(Data.routeSegments(v,300).map(s=>s.tone),['normal','unknown']);
+  v.currentDelay=null;
+  assert.deepEqual(Data.routeSegments(v,300).map(s=>s.tone),['unknown','unknown']);
+  assert.deepEqual(Data.routeSegments(v,300,false).map(s=>s.tone),['unknown','unknown']);
+});
+
+test('current segment uses next stop even when its scheduled time has passed', () => {
+  const v=Data.adapt(input()).vehicles[0];
+  v.currentDelay=400;
+  v.nextStop={id:7,position:[55.76,37.52],address:'Пропущенная по времени',time:'12:59:00'};
+  const segments=Data.routeSegments(v,300);
+  assert.equal(segments[0].to.id,7);
+  assert.equal(segments[0].tone,'critical');
+  assert.equal(segments[1].tone,'warning');
+  v.age=121;
+  assert.deepEqual(Data.routeSegments(v,300).map(s=>s.tone),['unknown','unknown']);
+});
+
+test('red wins over forecast on the same segment and threshold is configurable', () => {
+  const v=Data.adapt(input()).vehicles[0];
+  v.currentDelay=400;
+  assert.equal(Data.routeSegments(v,300)[0].tone,'critical');
+  assert.equal(Data.routeSegments(v,410)[0].tone,'warning');
+  assert.equal(Data.routeSegments(v,500)[0].tone,'normal');
+});

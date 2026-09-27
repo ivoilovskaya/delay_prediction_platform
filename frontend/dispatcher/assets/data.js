@@ -11,7 +11,7 @@
     const reference = Date.parse(data.reference_time);
     return {time:clock(data.reference_time), vehicles:data.vehicles.filter(v => position(v.position)).map(v => {
       const p = v.prediction;
-      const f = p && Number.isFinite(p.predicted_delay_s) ? {
+      const f = p && p.status === 'ready' && Number.isFinite(v.telemetry_age_s) && v.telemetry_age_s <= 120 && Number.isFinite(p.predicted_delay_s) ? {
         delay:p.predicted_delay_s, address:p.target_stop_name || `Точка расписания ${p.target_stop_id}`,
         target:position(p.target_position) ? p.target_position : null, targetId:p.target_stop_id,
         plan:clock(p.target_time_plan), arrival:clock(p.predicted_arrival),
@@ -29,15 +29,34 @@
     })};
   }
   function fresh(v, connected=true) {
-    return Boolean(connected && v && v.age <= 120 && v.forecast?.status === 'ready');
+    return Boolean(connected && v && Number.isFinite(v.age) && v.age <= 120 && v.forecast?.status === 'ready');
   }
   function signal(v, threshold, connected=true) {
-    if (!v || !connected || v.age > 120) return {kind:'none'};
+    if (!v || !connected || !Number.isFinite(v.age) || v.age > 120) return {kind:'none'};
     if (Number.isFinite(v.currentDelay) && v.currentDelay >= threshold) return {kind:'late', current:v.currentDelay};
     if (fresh(v, connected) && v.forecast.delay >= threshold) return {kind:'risk', predicted:v.forecast.delay};
     return {kind:'none'};
   }
-  const api = {adapt, signal, fresh, clock, date};
+  function routeSegments(v, threshold, connected=true) {
+    if (!v) return [];
+    const current = connected && Number.isFinite(v.age) && v.age <= 120;
+    const stops = [...v.stops];
+    if (v.nextStop && position(v.nextStop.position)) {
+      const index = stops.findIndex(s => s.id === v.nextStop.id);
+      if (index >= 0) stops.splice(0, index);
+      else stops.unshift(v.nextStop);
+    }
+    const points = [{position:v.position, address:'Положение автобуса', time:v.lastSeen}, ...stops];
+    return points.slice(1).map((to, index) => {
+      const isTarget = fresh(v, connected) && to.id === v.forecast.targetId;
+      const late = current && index === 0 && Number.isFinite(v.currentDelay) && v.currentDelay >= threshold;
+      const predicted = isTarget && v.forecast.delay >= threshold;
+      const known = current && ((index === 0 && Number.isFinite(v.currentDelay)) || isTarget);
+      const tone = late ? 'critical' : predicted ? 'warning' : known ? 'normal' : 'unknown';
+      return {index, from:points[index], to, tone};
+    });
+  }
+  const api = {adapt, signal, fresh, clock, date, routeSegments};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.DispatcherData = api;
 })(globalThis);
