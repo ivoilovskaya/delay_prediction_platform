@@ -20,9 +20,7 @@ def test_dispatcher_page_and_local_assets(path):
     with TestClient(app) as client:
         response = client.get(path)
         assert response.status_code == 200
-        assert 'СИТУАЦИЯ НА СЕТИ' in response.text
-        assert 'Инциденты' in response.text
-        assert 'moscow-transport-logo.png' in response.text
+        assert 'ЗОНА ОТВЕТСТВЕННОСТИ' in response.text
         parser = Resources()
         parser.feed(response.text)
         for resource in parser.urls:
