@@ -16,6 +16,7 @@ from ml.feature_engineering import VehiclePlan, VehicleTrack, _align
 
 def fleet_snapshot():
     cfg = DBConfig()
+    predictions_rows = latest_for_all()
     historical = cfg.time_mode == 'stream'
     result = dict(mode='historical' if historical else 'live', demo_plan=os.getenv('DEMO_PLAN') == '1',
                   reference_time=None, vehicles=[], active_window_s=120)
@@ -61,7 +62,7 @@ def fleet_snapshot():
             sch = sch[np.isfinite(sch['_t']) & np.isfinite(sch['_lon']) & np.isfinite(sch['_lat'])]
             plans = {int(k): g.sort_values('_t') for k, g in sch.groupby(cfg.sch_tr)}
         from backend.endpoints import _present
-        predictions = {int(row['tr_id']): _present(row) for row in latest_for_all()}
+        predictions = {int(row['tr_id']): _present(row) for row in predictions_rows}
         for tr_id, group in tel.groupby(cfg.tel_tr):
             group = group.sort_values('_t')
             valid_group = group[group['_valid']]

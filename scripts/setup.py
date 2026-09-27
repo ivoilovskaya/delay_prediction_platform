@@ -42,7 +42,8 @@ def demo_plan(directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mode', choices=['historical', 'emulator'], default='historical')
-    parser.add_argument('--db', type=Path, help='Отдельная SQLite-база; по умолчанию demo.db/live.db')
+    parser.add_argument('--db', type=Path, help='Отдельная SQLite-база; по умолчанию input.db/live-input.db')
+    parser.add_argument('--results-db', type=Path, help='Файл результатов (results.db/live-results.db рядом с входной базой)')
     parser.add_argument('--port', type=int, default=int(os.getenv('PORT', '8000')))
     parser.add_argument('--demo-plan', action='store_true', help='Явно создать синтетический план и 3 демо-ТС')
     parser.add_argument('--schedule', type=Path, help='Актуальный CSV плана, время UTC')
@@ -74,8 +75,12 @@ def main():
             parser.error(f'Не удалось импортировать {module}: {exc}. Повторите с --install')
     if args.test:
         subprocess.run([sys.executable, '-m', 'pytest', '-q'], check=True)
-    db = (args.db or ROOT / 'artifacts' / ('live.db' if args.mode == 'emulator' else 'demo.db')).resolve()
+    db = (args.db or ROOT / 'artifacts' / ('live-input.db' if args.mode == 'emulator' else 'input.db')).resolve()
     db.parent.mkdir(parents=True, exist_ok=True)
+    results_db = (args.results_db or db.parent / ('live-results.db' if args.mode == 'emulator' else 'results.db')).resolve()
+    if results_db == db:
+        parser.error('--db и --results-db должны быть разными файлами')
+    os.environ['RESULTS_DATABASE_URL'] = 'sqlite:///' + str(results_db)
     os.environ['DATABASE_URL'] = 'sqlite:///' + str(db)
     command = [sys.executable, 'scripts/run_demo.py', '--port', str(args.port)]
     if args.mode == 'historical':
@@ -95,10 +100,6 @@ def main():
         os.environ['DEMO_PLAN'] = '1' if args.demo_plan else '0'
         os.environ.setdefault('ML_INTERVAL_S', '10')
         if args.demo_plan:
-            # Новый файл для каждого запуска демонстрации: не смешиваем планы разных запусков.
-            if args.db is None:
-                db = ROOT / 'artifacts' / f'emulator-demo-{time.time_ns()}.db'
-                os.environ['DATABASE_URL'] = 'sqlite:///' + str(db)
             args.schedule, args.unit_map, args.emulator_config = demo_plan(ROOT / 'artifacts' / f'emulator-{time.time_ns()}')
             print('ДЕМО: синтетический план и случайное движение; прогнозы не являются оценкой реального маршрута.', flush=True)
         os.environ['NDTP_UNIT_MAP'] = str(args.unit_map.resolve())
@@ -107,12 +108,16 @@ def main():
             mapping = json.load(source)
         if not mapping:
             parser.error('Карта устройств пустая')
+        existing = db.exists()
         init_db()
-        print(f'План: {load_schedule(args.schedule)} остановок; историческая телеметрия НЕ загружается.', flush=True)
+        if not existing:
+            print(f'План: {load_schedule(args.schedule)} остановок.', flush=True)
+        else:
+            print('Существующая база сохранена; CSV плана повторно не загружается.', flush=True)
         command += ['--ingestion']
         if not args.no_emulator:
             command += ['--emulator-config', str(args.emulator_config.resolve())]
-    print(f'База: {db}', flush=True)
+    print(f'Входная база: {db}; результаты: {results_db}', flush=True)
     os.execv(sys.executable, command)
 
 

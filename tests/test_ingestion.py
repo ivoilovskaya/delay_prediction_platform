@@ -121,6 +121,8 @@ def test_cleanup_retention_and_receive_time(live_db):
             write_predictions(engine, DBConfig(), [prediction])
     finally:
         engine.dispose()
-    assert cleanup(now) == {'telemetry': 1, 'schedule_plan': 1, 'predictions': 1}
+    assert cleanup(now) == {'telemetry': 1, 'schedule_plan': 1}
+    from ml.results_maintenance import cleanup as cleanup_results
+    assert cleanup_results(now) == 1
     with connect() as conn:
         assert conn.execute('SELECT tr_id FROM telemetry').fetchone()[0] == 1

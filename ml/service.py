@@ -238,9 +238,14 @@ def predict_from_db(write: bool = True, T: Optional[TimeLike] = None) -> DBCycle
     cfg = DBConfig()
     if not cfg.url:
         raise HTTPException(status_code=503, detail="DATABASE_URL не задан")
+    engine = None
     try:
-        r = run_cycle(get_predictor(), make_engine(cfg), cfg, None if T is None else to_unix(T), write)
+        engine = make_engine(cfg)
+        r = run_cycle(get_predictor(), engine, cfg, None if T is None else to_unix(T), write)
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"база недоступна: {type(e).__name__}: {e}")
+    finally:
+        if engine is not None:
+            engine.dispose()
     return DBCycleOut(T=r["T"], written=r["written"], predictions=[_out(p) for p in r["predictions"]],
                       skipped=[SkippedOut(**k) for k in r["skipped"]], timing_ms=r["timing_ms"])

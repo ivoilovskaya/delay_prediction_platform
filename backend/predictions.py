@@ -1,4 +1,4 @@
-"""Чтение таблицы прогнозов из общей базы. Подключение не создаёт таблиц."""
+"""Чтение таблицы прогнозов из базы результатов. Подключение не создаёт таблиц."""
 
 import os
 from pathlib import Path
@@ -26,18 +26,20 @@ def _quote(name):
 
 
 def _read(sql, params=None):
-    url = os.getenv("DATABASE_URL")
+    explicit = os.getenv("RESULTS_DATABASE_URL")
+    url = explicit or os.getenv("DATABASE_URL")
     if not url:
         return []
     parsed_url = make_url(url)
     if (parsed_url.get_backend_name() == "sqlite" and parsed_url.database
-            and parsed_url.database != ":memory:" and not Path(parsed_url.database).exists()):
+            and parsed_url.database != ":memory:" and not Path(parsed_url.database).exists() and not explicit):
         return []
-    engine = create_engine(url, pool_pre_ping=True)
+    from ml.results_db import existing_engine
+    engine = existing_engine(url, readonly=True) if parsed_url.database != ":memory:" else create_engine(url)
     try:
         table = _table()
         with engine.connect() as connection:
-            if not inspect(connection).has_table(table):
+            if not explicit and not inspect(connection).has_table(table):
                 return []
             return [dict(row) for row in connection.execute(text(sql.format(table=_quote(table))), params or {}).mappings()]
     finally:
