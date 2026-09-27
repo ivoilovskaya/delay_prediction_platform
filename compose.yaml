@@ -1,0 +1,121 @@
+name: delay-platform
+
+x-environment: &environment
+  DATABASE_URL: sqlite:////data/input/input.db
+  RESULTS_DATABASE_URL: sqlite:////data/results/results.db
+  ML_TIME_MODE: wall
+  MODEL_TYPE: ${MODEL_TYPE:-ensemble}
+  ML_INTERVAL_S: ${ML_INTERVAL_S:-10}
+  ML_WINDOW_S: ${ML_WINDOW_S:-2700}
+  PREDICTION_MAX_AGE_SECONDS: ${PREDICTION_MAX_AGE_SECONDS:-90}
+  DEMO_PLAN: "1"
+
+x-app: &app
+  image: delay-prediction-platform:local
+  build: .
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 15s
+  environment: *environment
+  depends_on:
+    prepare:
+      condition: service_completed_successfully
+
+services:
+  prepare:
+    image: delay-prediction-platform:local
+    build: .
+    init: true
+    restart: "no"
+    environment: *environment
+    command: ["python", "-m", "scripts.container_setup", "emulator"]
+    volumes:
+      - input-data:/data/input
+      - results-data:/data/results
+      - runtime-config:/data/runtime
+
+  backend:
+    <<: *app
+    ports:
+      - "127.0.0.1:${PORT:-8000}:8000"
+    volumes:
+      - input-data:/data/input
+      - results-data:/data/results:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/vehicles/active', timeout=5).read()"]
+      interval: 10s
+      timeout: 8s
+      start_period: 30s
+      retries: 3
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "ml.worker"]
+    volumes:
+      - input-data:/data/input
+      - results-data:/data/results
+
+  ingestion:
+    <<: *app
+    command: ["python", "-m", "ndtp_ingestion.server"]
+    environment:
+      DATABASE_URL: sqlite:////data/input/input.db
+      NDTP_HOST: 0.0.0.0
+      NDTP_PORT: "9000"
+      NDTP_UNIT_MAP: /data/runtime/units.json
+      ML_WINDOW_S: ${ML_WINDOW_S:-2700}
+      CLEANUP_INTERVAL_S: ${CLEANUP_INTERVAL_S:-600}
+      TELEMETRY_RETENTION_S: ${TELEMETRY_RETENTION_S:-7200}
+      SCHEDULE_RETENTION_S: ${SCHEDULE_RETENTION_S:-21600}
+    volumes:
+      - input-data:/data/input
+      - runtime-config:/data/runtime:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9000), timeout=3).close()"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  results-maintenance:
+    <<: *app
+    command: ["python", "-m", "ml.results_maintenance"]
+    environment:
+      RESULTS_DATABASE_URL: sqlite:////data/results/results.db
+      ML_TIME_MODE: wall
+      PREDICTIONS_RETENTION_S: ${PREDICTIONS_RETENTION_S:-86400}
+      RESULTS_CLEANUP_INTERVAL_S: ${RESULTS_CLEANUP_INTERVAL_S:-600}
+    volumes:
+      - results-data:/data/results
+
+  emulator:
+    image: ndtp-telemetry-emulator:1.0
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: "18080"
+    depends_on:
+      ingestion:
+        condition: service_healthy
+
+  emulator-config:
+    <<: *app
+    restart: "no"
+    command: ["python", "-m", "scripts.configure_emulator", "--url", "http://emulator:18080", "--config", "/data/runtime/emulator.json"]
+    environment: {}
+    volumes:
+      - runtime-config:/data/runtime:ro
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+      ingestion:
+        condition: service_healthy
+      emulator:
+        condition: service_started
+        restart: true
+
+volumes:
+  input-data:
+  results-data:
+  runtime-config:

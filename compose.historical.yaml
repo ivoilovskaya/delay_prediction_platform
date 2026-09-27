@@ -1,0 +1,36 @@
+# Separate project name keeps historical predictions away from live retention.
+name: delay-history
+services:
+  prepare:
+    extends:
+      file: compose.yaml
+      service: prepare
+    command: ["python", "-m", "scripts.container_setup", "historical", "--dataset", "/dataset"]
+    environment:
+      ML_TIME_MODE: stream
+      DEMO_PLAN: "0"
+    volumes:
+      - type: bind
+        source: ./data/dataset
+        target: /dataset
+        read_only: true
+        bind:
+          create_host_path: false
+  backend:
+    extends:
+      file: compose.yaml
+      service: backend
+    environment:
+      ML_TIME_MODE: stream
+      DEMO_PLAN: "0"
+  worker:
+    extends:
+      file: compose.yaml
+      service: worker
+    environment:
+      ML_TIME_MODE: stream
+      DEMO_PLAN: "0"
+volumes:
+  input-data:
+  results-data:
+  runtime-config:
